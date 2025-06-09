@@ -54,7 +54,7 @@ jobs:
           echo "------------------------------------"
           echo "Final Image URI to be pushed: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}"
           echo "------------------------------------"
-                  
+
       # 4. Docker 이미지 빌드, 태그 지정 및 ECR에 푸시 (이전과 동일)
       - name: Build, tag, and push image to Amazon ECR
         id: build-and-push-image
@@ -115,5 +115,5 @@ jobs:
           aws ssm send-command \
             --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
             --document-name "AWS-RunShellScript" \
-            --comment "Deploying ${FULL_IMAGE_URI}" \
+            --comment "Deploy image tag ${{ env.IMAGE_TAG }} via GitHub Actions" \
             --parameters "$SSM_PARAMETERS"
