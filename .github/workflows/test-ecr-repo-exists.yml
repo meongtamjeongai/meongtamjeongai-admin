@@ -1,0 +1,61 @@
+name: Manual ECR Repository Existence Check
+
+on:
+  workflow_dispatch: # Actions 탭에서 수동으로 실행 가능하도록 설정
+    inputs:
+      aws_region:
+        description: 'ECR 리포지토리가 있는 AWS 리전'
+        required: true
+        default: 'ap-northeast-2'
+      ecr_repository_name:
+        description: '존재 여부를 확인할 ECR 리포지토리의 정확한 이름'
+        required: true
+        default: 'fastapi-infra-dev-admin-app' # 테스트하려는 리포지토리 이름 예시
+
+# OIDC를 사용하기 위한 권한 설정
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  check-ecr-repository:
+    name: Check if ECR Repository Exists
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Display Inputs
+        run: |
+          echo "Checking for repository '${{ github.event.inputs.ecr_repository_name }}' in region '${{ github.event.inputs.aws_region }}'..."
+
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          # 이전 deploy-ecr.yml 워크플로우에서 사용하던 것과 동일한 IAM 역할 ARN Secret을 사용합니다.
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME_ARN }}
+          aws-region: ${{ github.event.inputs.aws_region }}
+
+      - name: Attempt to describe ECR repository
+        id: describe_repo
+        # 이 스텝이 실패하더라도(리포지토리가 없으면 실패함) 워크플로우가 중단되지 않도록 설정
+        continue-on-error: true 
+        run: |
+          # AWS CLI를 사용하여 특정 이름의 리포지토리 정보를 요청합니다.
+          # 리포지토리가 존재하면 성공(exit code 0), 없으면 실패(non-zero exit code)합니다.
+          aws ecr describe-repositories --repository-names "${{ github.event.inputs.ecr_repository_name }}"
+
+      - name: Report Success
+        # 'describe_repo' 스텝이 성공했을 경우에만 이 스텝이 실행됩니다.
+        if: steps.describe_repo.outcome == 'success'
+        run: |
+          echo "✅ Success! The repository '${{ github.event.inputs.ecr_repository_name }}' was found in region '${{ github.event.inputs.aws_region }}'."
+          echo "The ECR_REPOSITORY secret in your GitHub settings appears to be correct."
+
+      - name: Report Failure
+        # 'describe_repo' 스텝이 실패했을 경우에만 이 스텝이 실행됩니다.
+        if: steps.describe_repo.outcome == 'failure'
+        run: |
+          echo "::error::Failure! The repository '${{ github.event.inputs.ecr_repository_name }}' was NOT found in region '${{ github.event.inputs.aws_region }}'."
+          echo "Please double-check the repository name in your AWS ECR console and compare it with the value you entered."
+          echo "Also, verify that the 'ECR_REPOSITORY' secret in your GitHub repository settings is correct."
+          # 워크플로우 전체가 실패로 표시되도록 exit 1 처리
+          exit 1
