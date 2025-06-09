@@ -1,9 +1,12 @@
-name: CI/CD to AWS ECR and Deploy to EC2
+name: CI/CD to AWS ECR and Deploy to EC2 (Manual Trigger)
 
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch: # 👈 수동 실행을 위한 트리거로 변경
+    inputs:
+      git_ref:
+        description: '빌드할 Git 참조 (브랜치, 태그 또는 커밋 SHA)'
+        required: true
+        default: 'main' # 기본값은 main 브랜치
 
 permissions:
   id-token: write
