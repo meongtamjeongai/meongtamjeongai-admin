@@ -1,0 +1,37 @@
+# Python 캐시 및 빌드 파일
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pyd
+*.pyc
+*.pyo
+*.egg-info/
+*.egg
+
+# 가상환경
+env/
+venv/
+ENV/
+.venv/
+
+# 빌드 아티팩트
+build/
+dist/
+
+# 설정 및 편집기 관련 파일
+*.log
+*.sqlite3
+.DS_Store
+*.swp
+.idea/
+.vscode/
+*.bak
+
+# Git 및 기타 버전관리 시스템
+.git/
+.gitignore
+
+# 환경 설정 파일
+.env
+.env.*

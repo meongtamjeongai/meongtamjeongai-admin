@@ -1,0 +1,54 @@
+{
+  "name": "멍탐정 Streamlit 관리자 페이지",
+
+  // 1. Docker Compose 설정
+  // Docker Compose 파일을 사용하여 컨테이너를 빌드하고 실행합니다.
+  "dockerComposeFile": "../docker-compose.yml",
+  "service": "admin-app", // docker-compose.yml에 정의된 서비스 이름
+  
+  // 2. 환경 변수 파일을 컨테이너에 연결
+  // 프로젝트 루트의 .env 파일을 읽어 컨테이너의 환경 변수로 설정합니다.
+  "runArgs": ["--env-file", ".env"],
+
+  "workspaceFolder": "/app", // Dockerfile의 WORKDIR과 일치
+  "features": {
+    "ghcr.io/devcontainers/features/git:1": {}
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "charliermarsh.ruff",
+        "ms-toolsai.jupyter",
+        "njpwerner.autodocstring",
+        "GitHub.copilot",
+        "GitHub.copilot-chat"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "python.linting.enabled": true,
+        "python.linting.pylintEnabled": false,
+        "python.formatting.provider": "none",
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff",
+          "editor.formatOnSave": true,
+          "editor.codeActionsOnSave": {
+            "source.fixAll": "explicit",
+            "source.organizeImports": "explicit"
+          }
+        },
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "terminal.integrated.shell.linux": "/bin/bash"
+      }
+    }
+  },
+
+  // 3. 포트 포워딩 수정 (Streamlit 앱 포트만 지정)
+  "forwardPorts": [8501],
+
+  "postAttachCommand": "streamlit run admin_app.py",
+  
+  // Dockerfile에 별도 USER 지시문이 없으므로 'root' 사용
+  "remoteUser": "root"
+}

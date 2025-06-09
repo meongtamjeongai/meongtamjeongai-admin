@@ -1,0 +1,23 @@
+# docker-compose.yml
+
+services:
+  # Streamlit 앱 서비스
+  admin-app:
+    # 현재 디렉터리의 Dockerfile을 사용하여 이미지를 빌드
+    build: .
+    # 컨테이너 이름 지정
+    container_name: admin-server
+    # .env 파일로부터 환경변수 가져오기
+    env_file:
+      - .env
+    # 포트 연결
+    ports:
+      - "8501:8501"
+    # meong 네트워크에 연결
+    networks:
+      - meong
+
+# 사용할 네트워크 정의
+networks:
+  meong:
+    external: true

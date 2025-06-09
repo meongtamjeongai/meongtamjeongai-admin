@@ -3,6 +3,7 @@
 import logging
 import os
 from contextlib import contextmanager
+from dotenv import load_dotenv
 
 # Firebase Admin SDK 및 비밀번호 해싱 라이브러리 임포트
 import firebase_admin
@@ -17,6 +18,10 @@ from passlib.context import CryptContext
 from sqlalchemy import create_engine, desc
 from sqlalchemy.orm import Session, joinedload, sessionmaker
 
+# .env 파일에서 환경 변수 로드
+# 이 코드는 os.getenv를 호출하기 전에 실행되어야 합니다.
+load_dotenv()
+
 # 로깅 설정
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -27,7 +32,7 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # --- Firebase Admin SDK 초기화 ---
 try:
-    cred_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    cred_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "./serviceAccountKey.json")
     if cred_path and os.path.exists(cred_path):
         if not firebase_admin._apps:
             cred = credentials.Certificate(cred_path)
