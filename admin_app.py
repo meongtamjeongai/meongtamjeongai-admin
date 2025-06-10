@@ -189,41 +189,46 @@ def main():
     st.set_page_config(page_title="멍탐정 관리자", layout="wide")
     st.title("🐶 멍탐정 관리자 페이지 (API Client Mode)")
 
-    # 1. 세션 상태 초기화
     if "logged_in" not in st.session_state:
         st.session_state.logged_in = False
     
-    # 2. 로그인 상태이면, 무조건 메인 페이지 표시
     if st.session_state.logged_in:
         render_main_admin_page()
         return
 
-    # 3. 로그아웃 상태일 때의 로직
     api_client = ApiClient()
-    
-    # 4. "비밀 가입 모드"가 활성화되어 있는지 확인
     is_signup_mode_enabled = os.getenv("SECRET_SIGNUP_MODE") == "true"
 
     if is_signup_mode_enabled:
-        # 5. 가입 모드가 활성화된 경우, 백엔드에 슈퍼유저가 실제로 없는지 다시 한번 확인
-        # st.cache_data를 사용하여 API 호출 결과를 캐싱 -> 페이지 새로고침 시 불필요한 호출 방지
-        @st.cache_data(ttl=60) # 60초 동안 결과 캐시
-        def get_superuser_existence():
+        @st.cache_data(ttl=10) # 캐시 시간을 짧게 줄여 재시도 용이하게 함
+        def get_superuser_existence_from_api():
             return api_client.check_superuser_exists()
 
-        superuser_exists = get_superuser_existence()
+        superuser_exists = get_superuser_existence_from_api()
 
-        if not superuser_exists:
-            # 슈퍼유저가 존재하지 않을 때만 가입 페이지 표시
+        # 👇 API 호출 결과를 세분화하여 처리
+        if superuser_exists is None:
+            # API 호출 실패
+            st.error(
+                "백엔드 API 서버에 연결할 수 없습니다. 관리자 앱 컨테이너의 네트워크 설정 또는 백엔드 서버의 상태를 확인해주세요."
+            )
+            st.code(f"호출 대상 API 주소: {api_client.base_url}/admin/superuser-exists")
+            if st.button("재시도"):
+                # 캐시를 지우고 재시도할 수 있도록 함
+                st.cache_data.clear()
+                st.rerun()
+
+        elif superuser_exists is False:
+            # API 성공 & 슈퍼유저 없음 -> 가입 페이지
             render_initial_setup_page()
-        else:
-            # 슈퍼유저가 이미 존재하면 (누군가 방금 만들었거나), 로그인 페이지 표시
+            
+        else: # superuser_exists is True
+            # API 성공 & 슈퍼유저 있음 -> 로그인 페이지
             st.info("관리자 계정이 이미 존재합니다. 로그인을 진행해주세요.")
             render_login_page()
-    else:
-        # 6. 가입 모드가 비활성화된 경우, 항상 로그인 페이지만 표시
-        render_login_page()
 
+    else:
+        render_login_page()
 
 if __name__ == "__main__":
     main()

@@ -1,4 +1,4 @@
-# streamlit_admin/requirements.txt
+# requirements.txt
 streamlit
 pandas # 데이터를 표 형태로 예쁘게 보여주기 위해 사용
 firebase-admin

@@ -110,22 +110,26 @@ class ApiClient:
             return {"detail": str(e)}
         
 
-    def check_superuser_exists(self) -> bool:
+    def check_superuser_exists(self) -> bool | None:
         """
         백엔드에 슈퍼유저가 존재하는지 확인합니다.
-        존재하거나 API 호출에 실패하면 True를 반환하여 안전하게 로그인 페이지를 유도합니다.
+        - 성공 시: True 또는 False 반환
+        - API 호출 실패 시: None 반환
         """
         url = f"{self.base_url}/admin/superuser-exists"
         try:
-            response = requests.get(url)
+            # 💡 타임아웃을 적절히 설정하여 무한 대기 방지
+            response = requests.get(url, timeout=5) # 5초 타임아웃
             response.raise_for_status()
-            # API 응답이 {"detail": true} 또는 그냥 true 일 수 있음.
-            # bool 값으로 직접 오는지 확인
-            if isinstance(response.json(), bool):
-                return response.json()
-            return True # 예상치 못한 응답일 경우 안전하게 True 반환
+            
+            result = response.json()
+            if isinstance(result, bool):
+                print(f"API 응답 (superuser_exists): {result}")
+                return result
+            else:
+                # 예상치 못한 응답 형태는 에러로 간주
+                print(f"오류: 슈퍼유저 존재 여부 확인 API가 bool이 아닌 값을 반환했습니다: {result}")
+                return None
         except requests.exceptions.RequestException as e:
-            print(f"슈퍼유저 존재 여부 확인 실패: {e}")
-            # API 호출 실패 시, 가입 페이지를 보여주는 것보다
-            # 로그인 페이지를 보여주는 것이 더 안전하므로 True 반환
-            return True
+            print(f"API 호출 오류 (check_superuser_exists): {e}")
+            return None
