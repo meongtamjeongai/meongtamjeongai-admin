@@ -1,146 +1,129 @@
-# 워크플로우의 최상단에 위치하며, GitHub Actions UI의 워크플로우 목록에 표시될 이름입니다.
-# 이모지를 사용하여 시각적으로 구분하면 편리합니다.
+# 워크플로우의 UI 표시 이름
 name: "🎨 [Admin] Build, Push to ECR & Deploy via SSM"
 
-# 'run-name'은 개별 실행(Run)의 이름을 동적으로 설정합니다.
-# 이를 통해 Actions 실행 기록에서 각 배포의 목적을 한눈에 파악할 수 있습니다.
-# 예: "🎨 Admin Deploy | UI 버그 수정 | by @github_user"
-run-name: "🎨 Admin Deploy | ${{ github.event.inputs.run_description }} | by @${{ github.actor }}"
+# 동적 실행 이름 (버전 정보 추가)
+run-name: "🎨 Admin v${{ github.event.inputs.image_version }} | ${{ github.event.inputs.run_description }} | by @${{ github.actor }}"
 
-# 'on' 섹션은 이 워크플로우가 언제 실행될지를 정의합니다.
 on:
-  # 'workflow_dispatch'는 GitHub UI에서 "Run workflow" 버튼을 눌러 수동으로 실행할 수 있게 합니다.
   workflow_dispatch:
-    # 'inputs' 섹션은 수동 실행 시 사용자로부터 받을 파라미터를 정의합니다.
     inputs:
       git_ref:
         description: "빌드할 Git 참조 (브랜치, 태그 또는 커밋 SHA)"
         required: true
-        default: "main" # 기본적으로 'main' 브랜치를 사용합니다.
+        default: "main"
+      # ⭐️ 1. 이미지 버전을 입력받는 필드 추가
+      image_version:
+        description: "이미지 버전 태그 (예: 1.0.0, 1.0.1-hotfix)"
+        required: true
+        default: "0.0.1" # 기본 버전
       run_description:
         description: "💬 이 배포의 목적을 입력하세요 (예: 사용자 UI 개선)"
         required: true
-        default: "Regular Manual Deployment" # 기본 설명
+        default: "Regular Manual Deployment"
 
-# 'permissions'는 이 워크플로우가 GitHub API와 상호작용하기 위해 필요한 권한을 정의합니다.
+# ... (permissions, env 등은 기존과 동일)
 permissions:
-  id-token: write # AWS OIDC 인증을 위해 ID 토큰을 발급받을 권한
-  contents: read # 리포지토리 코드를 읽을(checkout) 권한
+  id-token: write
+  contents: read
 
-# 'env'는 이 워크플로우의 모든 잡(job)에서 공통적으로 사용할 환경 변수를 설정합니다.
-# GitHub Secrets를 사용하여 민감한 정보를 안전하게 관리합니다.
 env:
-  AWS_REGION: ${{ secrets.AWS_REGION }} # 배포할 AWS 리전
-  ECR_REPOSITORY: ${{ secrets.ADMIN_ECR_REPOSITORY }} # 관리자 앱 이미지를 저장할 ECR 리포지토리 이름
-  CONTAINER_NAME: admin-app-container # EC2 인스턴스에서 실행될 컨테이너의 이름
-  HOST_PORT: ${{ secrets.ADMIN_HOST_PORT }} # EC2 인스턴스에서 노출할 포트 (예: 8501)
-  CONTAINER_PORT: ${{ secrets.ADMIN_CONTAINER_PORT }} # 컨테이너 내부에서 앱이 사용하는 포트 (예: 8501)
-  # ⭐️ 네트워크 문제 해결을 위한 환경 변수 추가
-  ALB_PRIVATE_IP: ${{ secrets.ALB_PRIVATE_IP }} # FastAPI 백엔드 ALB의 프라이빗 IP 주소
-  FASTAPI_BASE_URL: ${{ secrets.FASTAPI_BASE_URL }} # 관리자 앱이 호출할 FastAPI의 전체 URL (예: https://meong.shop/api/v1)
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  ECR_REPOSITORY: ${{ secrets.ADMIN_ECR_REPOSITORY }}
+  CONTAINER_NAME: admin-app-container
+  HOST_PORT: ${{ secrets.ADMIN_HOST_PORT }}
+  CONTAINER_PORT: ${{ secrets.ADMIN_CONTAINER_PORT }}
+  ALB_PRIVATE_IP: ${{ secrets.ALB_PRIVATE_IP }}
+  FASTAPI_BASE_URL: ${{ secrets.FASTAPI_BASE_URL }}
 
-# 'jobs'는 워크플로우를 구성하는 실제 작업 단위들을 정의합니다.
 jobs:
-  # 첫 번째 잡: 실행 정보를 보기 좋게 출력합니다. (선택 사항이지만 권장)
   print_run_info:
     name: 0. Print Run Information
     runs-on: ubuntu-latest
     steps:
       - name: Display run parameters
         run: |
-          # GitHub Actions의 'Summary' 탭에 마크다운 형식으로 실행 정보를 기록합니다.
+          # Summary에 버전 정보 추가
           echo "### 🎨 Admin App Deployment Details" >> $GITHUB_STEP_SUMMARY
           echo "| Parameter | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
           echo "| **Git Ref** | \`${{ github.event.inputs.git_ref }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Image Version** | \`${{ github.event.inputs.image_version }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Description** | ${{ github.event.inputs.run_description }} |" >> $GITHUB_STEP_SUMMARY
           echo "| **Triggered by** | `@${{ github.actor }}` |" >> $GITHUB_STEP_SUMMARY
 
-  # 두 번째 잡: 코드를 빌드하고, 이미지를 ECR에 푸시하고, EC2에 배포합니다.
   build-and-deploy:
     name: Build, Push to ECR, and Deploy to EC2
     runs-on: ubuntu-latest
-    needs: print_run_info # 'print_run_info' 잡이 성공해야 이 잡이 실행됩니다.
+    needs: print_run_info
 
     steps:
-      # 1. 소스 코드 체크아웃
       - name: Checkout source code
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.git_ref }} # 사용자가 입력한 Git 참조를 사용합니다.
+          ref: ${{ github.event.inputs.git_ref }}
 
-      # 2. AWS 자격 증명 설정 (OIDC 방식)
-      # Access Key를 직접 사용하지 않고, GitHub Actions와 AWS 간의 신뢰 관계를 통해
-      # 임시 자격 증명을 안전하게 발급받습니다.
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME_ARN }} # 이 워크플로우가 위임받을 IAM 역할의 ARN
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # 3. Amazon ECR 로그인
-      # 위에서 얻은 AWS 자격 증명을 사용하여 ECR에 로그인합니다.
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      # 4. Docker 이미지 빌드 및 ECR에 푸시
-      # 소스 코드를 Dockerfile을 기반으로 빌드하고, ECR에 업로드합니다.
+      # ⭐️ 2. Docker 이미지 빌드 및 ECR에 두 개의 태그로 푸시
       - name: Build, tag, and push image to Amazon ECR
         id: build-and-push-image
         env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }} # ECR 로그인 결과로 얻은 레지스트리 주소
-          IMAGE_TAG: ${{ github.sha }} # 커밋 해시를 이미지 태그로 사용하여 버전을 관리합니다.
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_VERSION: ${{ github.event.inputs.image_version }}
         uses: docker/build-push-action@v5
         with:
-          context: . # Dockerfile이 있는 현재 디렉토리
-          push: true # 빌드 후 ECR에 푸시
-          tags: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }} # 최종 이미지 URI (예: 123456789012.dkr.ecr.ap-northeast-2.amazonaws.com/my-admin-repo:abcdef1)
+          context: .
+          push: true
+          # 'tags' 옵션에 여러 줄로 태그를 지정하면, 동일한 이미지에 여러 태그가 적용됩니다.
+          tags: |
+            ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_VERSION }}
+            ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:latest
 
-      # 5. SSM Send-Command를 통해 EC2 인스턴스에 배포
-      # SSH 없이 AWS Systems Manager를 사용하여 안전하게 EC2에 명령을 실행합니다.
+      # ⭐️ 3. SSM Send-Command 스크립트 수정
       - name: Deploy to EC2 instance via SSM
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
+          IMAGE_VERSION: ${{ github.event.inputs.image_version }} # 입력받은 버전을 사용
         run: |
-          set -e # 스크립트 실행 중 오류가 발생하면 즉시 중단합니다.
+          set -e
 
           # 변수 유효성 검사
           if [ -z "$HOST_PORT" ] || [ -z "$CONTAINER_PORT" ] || [ -z "$ALB_PRIVATE_IP" ] || [ -z "$FASTAPI_BASE_URL" ]; then
-            echo "::error:: One or more required secrets (HOST_PORT, CONTAINER_PORT, ALB_PRIVATE_IP, FASTAPI_BASE_URL) are not set."
+            echo "::error:: One or more required secrets are not set."
             exit 1
           fi
 
-          # EC2 인스턴스에서 실행될 전체 쉘 스크립트 내용을 여기에 정의합니다.
-          # 'EOF'는 Here Document 문법으로, 여러 줄의 문자열을 변수에 쉽게 할당할 수 있게 합니다.
           COMMAND_SCRIPT=$(cat <<'EOF'
           set -e
 
-          # ⭐️ 해결책 1: /etc/hosts 파일 수정하여 내부 네트워크 통신 문제 해결
+          # ... (/etc/hosts 파일 업데이트 로직은 동일)
           echo ">>> Updating /etc/hosts for internal communication..."
-          # 기존에 'meong.shop' 도메인에 대한 설정이 있다면 삭제합니다.
           sudo sed -i '/meong.shop/d' /etc/hosts
-          # ALB의 프라이빗 IP를 'meong.shop'과 'admin.meong.shop' 도메인에 매핑합니다.
           echo "__ALB_PRIVATE_IP__ meong.shop admin.meong.shop" | sudo tee -a /etc/hosts
           echo "✅ /etc/hosts updated successfully."
 
-          # 1. ECR 로그인
+          # ECR 로그인
           echo ">>> Logging into ECR from EC2 instance..."
           aws ecr get-login-password --region __AWS_REGION__ | sudo docker login --username AWS --password-stdin __ECR_REGISTRY__
 
-          # 2. 새 이미지 다운로드
+          # 새 이미지 다운로드 (latest가 아닌, 명시적 버전 태그 사용)
           echo ">>> Pulling new image: __FULL_IMAGE_URI__"
           sudo docker pull __FULL_IMAGE_URI__
 
-          # 3. 기존 컨테이너 중지 및 제거
+          # 기존 컨테이너 중지 및 제거
           echo ">>> Stopping and removing old container if it exists..."
-          # -f name=__CONTAINER_NAME__ : 이름으로 컨테이너를 찾습니다.
-          # -q : 컨테이너 ID만 출력합니다.
           if [ $(sudo docker ps -q -f name=__CONTAINER_NAME__) ]; then sudo docker stop __CONTAINER_NAME__; fi
           if [ $(sudo docker ps -aq -f name=__CONTAINER_NAME__) ]; then sudo docker rm __CONTAINER_NAME__; fi
 
-          # 4. 새 컨테이너 실행
+          # 새 컨테이너 실행 (명시적 버전 태그 사용)
           echo ">>> Starting new container..."
           sudo docker run -d \
             --name __CONTAINER_NAME__ \
@@ -150,7 +133,7 @@ jobs:
             -e SECRET_SIGNUP_MODE="true" \
             __FULL_IMAGE_URI__
 
-          # 5. 불필요한 Docker 이미지 정리
+          # 불필요한 Docker 이미지 정리
           echo ">>> Pruning old docker images..."
           sudo docker image prune -af
 
@@ -158,8 +141,8 @@ jobs:
           EOF
           )
 
-          # 위 스크립트의 __PLACEHOLDER__ 부분을 실제 값으로 치환합니다.
-          FULL_IMAGE_URI="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+          # 플레이스홀더 치환 (IMAGE_TAG 대신 IMAGE_VERSION 사용)
+          FULL_IMAGE_URI="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_VERSION}"
           COMMAND_SCRIPT="${COMMAND_SCRIPT//__AWS_REGION__/${AWS_REGION}}"
           COMMAND_SCRIPT="${COMMAND_SCRIPT//__ECR_REGISTRY__/${ECR_REGISTRY}}"
           COMMAND_SCRIPT="${COMMAND_SCRIPT//__FULL_IMAGE_URI__/${FULL_IMAGE_URI}}"
@@ -169,12 +152,12 @@ jobs:
           COMMAND_SCRIPT="${COMMAND_SCRIPT//__ALB_PRIVATE_IP__/${ALB_PRIVATE_IP}}"
           COMMAND_SCRIPT="${COMMAND_SCRIPT//__FASTAPI_BASE_URL__/${FASTAPI_BASE_URL}}"
 
-          # SSM 파라미터는 JSON 형식을 따르므로, jq를 사용하여 안전하게 생성합니다.
+          # SSM 파라미터 생성 및 전송
           SSM_PARAMETERS=$(jq -n --arg script "$COMMAND_SCRIPT" '{ "commands": ($script | split("\n")) }')
 
           echo ">>> Sending deployment command to EC2 instance via SSM..."
           aws ssm send-command \
             --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
             --document-name "AWS-RunShellScript" \
-            --comment "Deploy image tag ${{ env.IMAGE_TAG }} via GitHub Actions" \
+            --comment "Deploy image version ${{ env.IMAGE_VERSION }} via GitHub Actions" \
             --parameters "$SSM_PARAMETERS"
