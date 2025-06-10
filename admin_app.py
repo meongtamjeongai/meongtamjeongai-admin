@@ -44,11 +44,11 @@ except Exception as e:
     logging.error(f"❌ Error initializing Firebase Admin SDK: {e}")
 
 # --- 데이터베이스 연결 설정 ---
-DB_USER = os.getenv("POSTGRES_USER", "dev_user")
-DB_PASSWORD = os.getenv("POSTGRES_PASSWORD", "dev_password")
-DB_HOST = os.getenv("DB_HOST", "db")
+DB_USER = os.getenv("POSTGRES_USER", "fastapidb")
+DB_PASSWORD = os.getenv("POSTGRES_PASSWORD", "meong5495")
+DB_HOST = os.getenv("DB_HOST", "fastapi-infra-rds-dev-20250610013842096300000007.cd8cciy2qeqa.ap-northeast-2.rds.amazonaws.com")
 DB_PORT = os.getenv("DB_PORT", "5432")
-DB_NAME = os.getenv("POSTGRES_DB", "dev_db")
+DB_NAME = os.getenv("POSTGRES_DB", "fastapidb")
 DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
 try:
