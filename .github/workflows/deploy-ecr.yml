@@ -34,6 +34,7 @@ env:
   CONTAINER_PORT: ${{ secrets.ADMIN_CONTAINER_PORT }}
   ALB_PRIVATE_IP: ${{ secrets.ALB_PRIVATE_IP }}
   FASTAPI_BASE_URL: ${{ secrets.FASTAPI_BASE_URL }}
+  SIGNUP_MODE_VALUE: ${{ vars.ADMIN_SECRET_SIGNUP_MODE || 'false' }}
 
 jobs:
   print_run_info:
