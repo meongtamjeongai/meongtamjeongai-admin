@@ -203,6 +203,7 @@ def main():
     
     # 4. "비밀 가입 모드" 환경 변수 확인 및 상태 변수 설정
     signup_mode_env_value = os.getenv("SECRET_SIGNUP_MODE", False)
+    is_signup_mode_enabled = signup_mode_env_value
 
     # ==========================================================
     # 💡 사이드바에 현재 설정 상태를 명확하게 표시
