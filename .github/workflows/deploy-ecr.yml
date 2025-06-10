@@ -104,12 +104,6 @@ jobs:
           COMMAND_SCRIPT=$(cat <<'EOF'
           set -e
 
-          # ... (/etc/hosts 파일 업데이트 로직은 동일)
-          echo ">>> Updating /etc/hosts for internal communication..."
-          sudo sed -i '/meong.shop/d' /etc/hosts
-          echo "__ALB_PRIVATE_IP__ meong.shop admin.meong.shop" | sudo tee -a /etc/hosts
-          echo "✅ /etc/hosts updated successfully."
-
           # ECR 로그인
           echo ">>> Logging into ECR from EC2 instance..."
           aws ecr get-login-password --region __AWS_REGION__ | sudo docker login --username AWS --password-stdin __ECR_REGISTRY__
@@ -129,8 +123,10 @@ jobs:
             --name __CONTAINER_NAME__ \
             -p __HOST_PORT__:__CONTAINER_PORT__ \
             --restart always \
+            --add-host=meong.shop:__ALB_PRIVATE_IP__ \
+            --add-host=admin.meong.shop:__ALB_PRIVATE_IP__ \
             -e FASTAPI_API_BASE_URL="__FASTAPI_BASE_URL__" \
-            -e SECRET_SIGNUP_MODE="true" \
+            -e SECRET_SIGNUP_MODE="__SIGNUP_MODE_VALUE__" \
             __FULL_IMAGE_URI__
 
           # 불필요한 Docker 이미지 정리
@@ -151,6 +147,7 @@ jobs:
           COMMAND_SCRIPT="${COMMAND_SCRIPT//__CONTAINER_PORT__/${CONTAINER_PORT}}"
           COMMAND_SCRIPT="${COMMAND_SCRIPT//__ALB_PRIVATE_IP__/${ALB_PRIVATE_IP}}"
           COMMAND_SCRIPT="${COMMAND_SCRIPT//__FASTAPI_BASE_URL__/${FASTAPI_BASE_URL}}"
+          COMMAND_SCRIPT="${COMMAND_SCRIPT//__SIGNUP_MODE_VALUE__/${SIGNUP_MODE_VALUE}}"
 
           # SSM 파라미터 생성 및 전송
           SSM_PARAMETERS=$(jq -n --arg script "$COMMAND_SCRIPT" '{ "commands": ($script | split("\n")) }')
