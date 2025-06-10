@@ -1,119 +1,121 @@
-name: CI/CD to AWS ECR and Deploy to EC2 (Manual Trigger)
+# .github/workflows/deploy-admin-app.yml
+
+name: Deploy Admin App to NAT Instance (Manual Trigger)
 
 on:
-  workflow_dispatch: # 👈 수동 실행을 위한 트리거로 변경
+  workflow_dispatch:
     inputs:
       git_ref:
         description: '빌드할 Git 참조 (브랜치, 태그 또는 커밋 SHA)'
         required: true
-        default: 'main' # 기본값은 main 브랜치
+        default: 'main'
 
 permissions:
   id-token: write
   contents: read
 
 env:
+  # ------------------------------------------------------------------
+  # ⚙️ 이 워크플로우가 사용할 환경 변수들 (GitHub Secrets에서 가져옴)
+  # ------------------------------------------------------------------
   AWS_REGION: ${{ secrets.AWS_REGION }}
-  ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
-  CONTAINER_NAME: my-app-container
-  # 🎯 추가: 포트 관련 Secrets를 환경 변수로 설정
-  HOST_PORT: ${{ secrets.HOST_PORT }}
-  CONTAINER_PORT: ${{ secrets.CONTAINER_PORT }}
+  # ⭐️ 관리자 앱 전용 ECR 리포지토리 이름을 사용하도록 명확화
+  ADMIN_ECR_REPOSITORY: ${{ secrets.ADMIN_ECR_REPOSITORY }}
+  # ⭐️ 관리자 앱 컨테이너 이름 지정
+  ADMIN_CONTAINER_NAME: meongtamjeong-admin-app
+  # ⭐️ 관리자 앱이 호스트와 컨테이너에서 사용할 포트
+  ADMIN_HOST_PORT: 8501
+  ADMIN_CONTAINER_PORT: 8501
 
 jobs:
-  build-and-deploy:
-    name: Build, Push to ECR, and Deploy to EC2
+  build-and-deploy-admin-app:
+    name: Build, Push Admin App to ECR, and Deploy to NAT Instance
     runs-on: ubuntu-latest
 
     steps:
-      # 1. 소스 코드 체크아웃 (이전과 동일)
+      # 1. 소스 코드 체크아웃
       - name: Checkout source code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.git_ref }}
 
-      # 2. AWS 자격 증명 설정 (OIDC, 이전과 동일)
+      # 2. AWS 자격 증명 설정 (OIDC 방식)
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # 3. Amazon ECR 로그인 (이전과 동일)
+      # 3. Amazon ECR 로그인
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Debug ECR Variables Before Push
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          echo "--- Verifying values before push ---"
-          echo "ECR Registry URL (from login step): ${{ env.ECR_REGISTRY }}"
-          echo "ECR Repository Name (from secret): ${{ env.ECR_REPOSITORY }}"
-          echo "Image Tag (from git sha): ${{ env.IMAGE_TAG }}"
-          echo "------------------------------------"
-          echo "Final Image URI to be pushed: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}"
-          echo "------------------------------------"
-
-      # 4. Docker 이미지 빌드, 태그 지정 및 ECR에 푸시 (이전과 동일)
-      - name: Build, tag, and push image to Amazon ECR
+      # 4. Docker 이미지 빌드 및 ECR에 푸시
+      - name: Build, tag, and push admin image to Amazon ECR
         id: build-and-push-image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
-
-      # 5. SSM Send-Command를 통해 배포 스크립트 실행 (수정된 부분)
-      - name: Deploy to EC2 instance via SSM
+        # ⭐️ 중요: 빌드 컨텍스트를 streamlit_admin 디렉토리로 지정
+        run: |
+          docker build -t ${{ env.ECR_REGISTRY }}/${{ env.ADMIN_ECR_REPOSITORY }}:${{ env.IMAGE_TAG }} ./streamlit_admin
+          docker push ${{ env.ECR_REGISTRY }}/${{ env.ADMIN_ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+      
+      # 5. SSM Send-Command를 통해 NAT 인스턴스에 배포
+      - name: Deploy to NAT instance via SSM Run Command
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
           set -e
           
-          # 변수 유효성 검사
-          if [ -z "$HOST_PORT" ] || [ -z "$CONTAINER_PORT" ]; then
-            echo "::error:: HOST_PORT or CONTAINER_PORT secret is not set."
-            exit 1
-          fi
-          
-          # 실행할 쉘 스크립트 내용을 변수에 저장 (템플릿 역할)
-          # 변수들은 __PLACEHOLDER__ 형태로 두고 나중에 치환
+          # 실행할 쉘 스크립트 내용을 변수에 저장 (Here Document)
+          # ⭐️ FASTAPI_API_BASE_URL 환경 변수 주입 로직 추가
           COMMAND_SCRIPT=$(cat <<'EOF'
           set -e
-          echo "Logging into ECR from EC2 instance..."
+          echo "==== [SSM] Logging into ECR from EC2 instance ===="
           aws ecr get-login-password --region __AWS_REGION__ | sudo docker login --username AWS --password-stdin __ECR_REGISTRY__
-          echo "Pulling new image: __FULL_IMAGE_URI__"
+          
+          echo "==== [SSM] Pulling new image: __FULL_IMAGE_URI__ ===="
           sudo docker pull __FULL_IMAGE_URI__
-          echo "Stopping and removing old container..."
+          
+          echo "==== [SSM] Stopping and removing old container: __CONTAINER_NAME__ ===="
           if [ $(sudo docker ps -q -f name=__CONTAINER_NAME__) ]; then sudo docker stop __CONTAINER_NAME__; fi
           if [ $(sudo docker ps -aq -f name=__CONTAINER_NAME__) ]; then sudo docker rm __CONTAINER_NAME__; fi
-          echo "Starting new container on host port __HOST_PORT__ mapping to container port __CONTAINER_PORT__..."
-          sudo docker run -d --name __CONTAINER_NAME__ -p __HOST_PORT__:__CONTAINER_PORT__ --restart always __FULL_IMAGE_URI__
-          echo "Pruning old docker images..."
+          
+          echo "==== [SSM] Starting new container on host port __HOST_PORT__... ===="
+          sudo docker run -d \
+            --name __CONTAINER_NAME__ \
+            -p __HOST_PORT__:__CONTAINER_PORT__ \
+            --restart always \
+            -e FASTAPI_API_BASE_URL="__FASTAPI_URL__" \
+            __FULL_IMAGE_URI__
+            
+          echo "==== [SSM] Pruning old docker images ===="
           sudo docker image prune -af
+          
+          echo "==== [SSM] Deployment script finished successfully! ===="
           EOF
           )
           
-          # 플레이스홀더를 실제 값으로 치환
-          FULL_IMAGE_URI="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+          # 스크립트 내 플레이스홀더들을 실제 값으로 치환
+          FULL_IMAGE_URI="${ECR_REGISTRY}/${ADMIN_ECR_REPOSITORY}:${IMAGE_TAG}"
           COMMAND_SCRIPT="${COMMAND_SCRIPT//__AWS_REGION__/${AWS_REGION}}"
           COMMAND_SCRIPT="${COMMAND_SCRIPT//__ECR_REGISTRY__/${ECR_REGISTRY}}"
           COMMAND_SCRIPT="${COMMAND_SCRIPT//__FULL_IMAGE_URI__/${FULL_IMAGE_URI}}"
-          COMMAND_SCRIPT="${COMMAND_SCRIPT//__CONTAINER_NAME__/${CONTAINER_NAME}}"
-          COMMAND_SCRIPT="${COMMAND_SCRIPT//__HOST_PORT__/${HOST_PORT}}"
-          COMMAND_SCRIPT="${COMMAND_SCRIPT//__CONTAINER_PORT__/${CONTAINER_PORT}}"
+          COMMAND_SCRIPT="${COMMAND_SCRIPT//__CONTAINER_NAME__/${ADMIN_CONTAINER_NAME}}"
+          COMMAND_SCRIPT="${COMMAND_SCRIPT//__HOST_PORT__/${ADMIN_HOST_PORT}}"
+          COMMAND_SCRIPT="${COMMAND_SCRIPT//__CONTAINER_PORT__/${ADMIN_CONTAINER_PORT}}"
+          # ⭐️ FastAPI URL 플레이스홀더 치환
+          COMMAND_SCRIPT="${COMMAND_SCRIPT//__FASTAPI_URL__/${{ secrets.FASTAPI_BASE_URL }}}"
           
           # jq를 사용하여 SSM 파라미터용 JSON을 안전하게 생성
           SSM_PARAMETERS=$(jq -n --arg script "$COMMAND_SCRIPT" '{ "commands": ($script | split("\n")) }')
 
-          echo "Sending deployment command to EC2 instance via SSM..."
+          echo "==== [GitHub Actions] Sending deployment command to NAT instance via SSM... ===="
           aws ssm send-command \
-            --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
+            --instance-ids "${{ secrets.NAT_INSTANCE_ID }}" \
             --document-name "AWS-RunShellScript" \
-            --comment "Deploy image tag ${{ env.IMAGE_TAG }} via GitHub Actions" \
+            --comment "Deploy Admin App image tag ${{ env.IMAGE_TAG }} via GitHub Actions" \
             --parameters "$SSM_PARAMETERS"
