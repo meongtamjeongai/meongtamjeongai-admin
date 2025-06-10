@@ -1,4 +1,4 @@
-# streamlit_admin/admin_app.py
+# admin_app.py
 
 import logging
 import streamlit as st

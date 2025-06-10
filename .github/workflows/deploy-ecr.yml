@@ -57,9 +57,8 @@ jobs:
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
-        # ⭐️ 중요: 빌드 컨텍스트를 streamlit_admin 디렉토리로 지정
         run: |
-          docker build -t ${{ env.ECR_REGISTRY }}/${{ env.ADMIN_ECR_REPOSITORY }}:${{ env.IMAGE_TAG }} ./streamlit_admin
+          docker build -t ${{ env.ECR_REGISTRY }}/${{ env.ADMIN_ECR_REPOSITORY }}:${{ env.IMAGE_TAG }} .
           docker push ${{ env.ECR_REGISTRY }}/${{ env.ADMIN_ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
       
       # 5. SSM Send-Command를 통해 NAT 인스턴스에 배포
