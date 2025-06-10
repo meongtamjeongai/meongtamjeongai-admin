@@ -17,6 +17,42 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
+
+def parse_pydantic_error(error_detail: list) -> str:
+    """
+    FastAPI(Pydantic)의 유효성 검사 오류(list of dicts)를
+    사용자 친화적인 문자열로 파싱합니다.
+    """
+    error_messages = []
+    if not isinstance(error_detail, list):
+        # 예상치 못한 형태의 오류일 경우 그대로 반환
+        return str(error_detail)
+
+    for error in error_detail:
+        field = error.get('loc', ['unknown'])[-1]  # 오류가 발생한 필드 이름 (예: 'email')
+        message = error.get('msg', 'Invalid value.')  # Pydantic이 제공하는 기본 메시지
+
+        # 필드 이름을 더 친숙하게 변경 (선택 사항)
+        field_map = {
+            'email': '이메일',
+            'password': '비밀번호',
+            'username': '사용자 이름',
+        }
+        friendly_field_name = field_map.get(field, field.capitalize())
+
+        # 오류 타입에 따라 메시지를 더 구체적으로 가공
+        error_type = error.get('type')
+        if 'not a valid email address' in message:
+            message = "유효한 이메일 주소가 아닙니다 (반드시 @ 기호가 포함되어야 합니다)."
+        elif error_type == 'string_too_short':
+            min_len = error.get('ctx', {}).get('min_length', 8)
+            message = f"최소 {min_len}자 이상이어야 합니다."
+
+        error_messages.append(f"- {friendly_field_name}: {message}")
+
+    # 여러 오류를 줄바꿈으로 합쳐서 반환
+    return "\n".join(error_messages)
+
 # --- Streamlit UI 렌더링 함수들 ---
 
 
@@ -51,9 +87,15 @@ def render_initial_setup_page():
                     time.sleep(2)
                     st.rerun()
                 else:
-                    # API로부터 받은 에러 메시지 표시
+                    # API로부터 받은 에러 메시지 상세 내용 추출
                     error_detail = result.get('detail', '알 수 없는 오류가 발생했습니다.')
-                    st.error(f"계정 생성 실패: {error_detail}")
+
+                    # 파싱 함수를 사용하여 사용자 친화적인 메시지로 변환
+                    friendly_error_message = parse_pydantic_error(error_detail)
+
+                    # 최종 에러 메시지를 st.error 대신 st.warning이나 st.info를 사용하여
+                    # 여러 줄로 보기 좋게 표시할 수도 있습니다. 여기서는 st.error를 사용합니다.
+                    st.error(f"계정 생성 실패:\n{friendly_error_message}")
 
 
 def render_login_page():
