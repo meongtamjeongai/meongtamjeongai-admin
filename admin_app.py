@@ -3,6 +3,7 @@
 import logging
 import streamlit as st
 from dotenv import load_dotenv
+import os
 
 # 로컬에서 API 클라이언트를 임포트합니다.
 from api_client import ApiClient
@@ -16,6 +17,37 @@ logging.basicConfig(
 )
 
 # --- Streamlit UI 렌더링 함수들 ---
+
+def render_initial_setup_page():
+    """최초 슈퍼유저 생성 페이지 UI를 렌더링합니다."""
+    st.subheader("초기 관리자 계정 생성")
+    st.info("관리자 계정이 없습니다. 최초의 슈퍼유저 계정을 생성해주세요.")
+    
+    api_client = ApiClient()
+
+    with st.form("setup_form"):
+        email = st.text_input("관리자 이메일")
+        password = st.text_input("관리자 비밀번호", type="password")
+        confirm_password = st.text_input("비밀번호 확인", type="password")
+        submitted = st.form_submit_button("계정 생성")
+        
+        if submitted:
+            if password != confirm_password:
+                st.error("비밀번호가 일치하지 않습니다.")
+            elif not email or not password:
+                st.error("이메일과 비밀번호를 모두 입력해주세요.")
+            else:
+                result = api_client.create_initial_superuser(email, password)
+                if result and 'id' in result: # 성공적으로 생성되면 'id'가 포함된 사용자 정보가 옴
+                    st.success(f"관리자 계정 '{result['email']}'이(가) 성공적으로 생성되었습니다. 로그인 페이지로 이동합니다.")
+                    # 성공 후에는 환경 변수를 비활성화해야 함을 안내
+                    st.warning("보안을 위해 관리자 앱의 SECRET_SIGNUP_MODE 환경 변수를 비활성화하고 재배포하세요.")
+                    # 로그인 페이지로 리디렉션하기 위해 잠시 대기 후 rerun
+                    # (또는 버튼을 누르게 유도)
+                else:
+                    # API로부터 받은 에러 메시지 표시
+                    error_detail = result.get('detail', '알 수 없는 오류가 발생했습니다.')
+                    st.error(f"계정 생성 실패: {error_detail}")
 
 def render_login_page():
     """
@@ -154,22 +186,44 @@ def render_main_admin_page():
 # --- 메인 애플리케이션 로직 ---
 
 def main():
-    """
-    Streamlit 앱의 메인 진입점.
-    """
     st.set_page_config(page_title="멍탐정 관리자", layout="wide")
     st.title("🐶 멍탐정 관리자 페이지 (API Client Mode)")
 
-    # 세션 상태에 'logged_in'이 없으면 False로 초기화
+    # 1. 세션 상태 초기화
     if "logged_in" not in st.session_state:
         st.session_state.logged_in = False
-
-    # 로그인 상태에 따라 적절한 페이지를 렌더링
+    
+    # 2. 로그인 상태이면, 무조건 메인 페이지 표시
     if st.session_state.logged_in:
         render_main_admin_page()
+        return
+
+    # 3. 로그아웃 상태일 때의 로직
+    api_client = ApiClient()
+    
+    # 4. "비밀 가입 모드"가 활성화되어 있는지 확인
+    is_signup_mode_enabled = os.getenv("SECRET_SIGNUP_MODE") == "true"
+
+    if is_signup_mode_enabled:
+        # 5. 가입 모드가 활성화된 경우, 백엔드에 슈퍼유저가 실제로 없는지 다시 한번 확인
+        # st.cache_data를 사용하여 API 호출 결과를 캐싱 -> 페이지 새로고침 시 불필요한 호출 방지
+        @st.cache_data(ttl=60) # 60초 동안 결과 캐시
+        def get_superuser_existence():
+            return api_client.check_superuser_exists()
+
+        superuser_exists = get_superuser_existence()
+
+        if not superuser_exists:
+            # 슈퍼유저가 존재하지 않을 때만 가입 페이지 표시
+            render_initial_setup_page()
+        else:
+            # 슈퍼유저가 이미 존재하면 (누군가 방금 만들었거나), 로그인 페이지 표시
+            st.info("관리자 계정이 이미 존재합니다. 로그인을 진행해주세요.")
+            render_login_page()
     else:
-        # 이제 관리자 앱은 DB 상태를 알 필요 없이 항상 로그인 페이지만 보여줌
+        # 6. 가입 모드가 비활성화된 경우, 항상 로그인 페이지만 표시
         render_login_page()
+
 
 if __name__ == "__main__":
     main()

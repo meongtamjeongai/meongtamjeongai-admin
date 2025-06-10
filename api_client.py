@@ -87,3 +87,45 @@ class ApiClient:
             if e.response is not None:
                 print(f"응답 내용: {e.response.text}")
             return None
+        
+    def create_initial_superuser(self, email: str, password: str) -> Dict[str, Any] | None:
+        """
+        최초 슈퍼유저 생성을 요청합니다.
+        """
+        url = f"{self.base_url}/admin/initial-superuser"
+        payload = {"email": email, "password": password}
+        
+        try:
+            response = requests.post(url, json=payload)
+            response.raise_for_status() # 201 Created가 아니면 예외 발생
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"최초 슈퍼유저 생성 실패: {e}")
+            if e.response is not None:
+                # 에러 메시지를 UI에 표시하기 위해 응답 내용을 반환
+                try:
+                    return e.response.json()
+                except:
+                    return {"detail": e.response.text}
+            return {"detail": str(e)}
+        
+
+    def check_superuser_exists(self) -> bool:
+        """
+        백엔드에 슈퍼유저가 존재하는지 확인합니다.
+        존재하거나 API 호출에 실패하면 True를 반환하여 안전하게 로그인 페이지를 유도합니다.
+        """
+        url = f"{self.base_url}/admin/superuser-exists"
+        try:
+            response = requests.get(url)
+            response.raise_for_status()
+            # API 응답이 {"detail": true} 또는 그냥 true 일 수 있음.
+            # bool 값으로 직접 오는지 확인
+            if isinstance(response.json(), bool):
+                return response.json()
+            return True # 예상치 못한 응답일 경우 안전하게 True 반환
+        except requests.exceptions.RequestException as e:
+            print(f"슈퍼유저 존재 여부 확인 실패: {e}")
+            # API 호출 실패 시, 가입 페이지를 보여주는 것보다
+            # 로그인 페이지를 보여주는 것이 더 안전하므로 True 반환
+            return True

@@ -66,6 +66,7 @@ jobs:
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
+          SECRET_SIGNUP_MODE_VALUE: ${{ secrets.SECRET_SIGNUP_MODE }}
         run: |
           set -e
           
@@ -89,6 +90,7 @@ jobs:
             -p __HOST_PORT__:__CONTAINER_PORT__ \
             --restart always \
             -e FASTAPI_API_BASE_URL="__FASTAPI_URL__" \
+            -e SECRET_SIGNUP_MODE="__SECRET_SIGNUP_MODE__" \
             __FULL_IMAGE_URI__
             
           echo "==== [SSM] Pruning old docker images ===="
@@ -106,6 +108,7 @@ jobs:
           COMMAND_SCRIPT="${COMMAND_SCRIPT//__CONTAINER_NAME__/${ADMIN_CONTAINER_NAME}}"
           COMMAND_SCRIPT="${COMMAND_SCRIPT//__HOST_PORT__/${ADMIN_HOST_PORT}}"
           COMMAND_SCRIPT="${COMMAND_SCRIPT//__CONTAINER_PORT__/${ADMIN_CONTAINER_PORT}}"
+          COMMAND_SCRIPT="${COMMAND_SCRIPT//__SECRET_SIGNUP_MODE__/${SECRET_SIGNUP_MODE_VALUE}}"
           # ⭐️ FastAPI URL 플레이스홀더 치환
           COMMAND_SCRIPT="${COMMAND_SCRIPT//__FASTAPI_URL__/${{ secrets.FASTAPI_BASE_URL }}}"
           
