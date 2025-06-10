@@ -189,32 +189,49 @@ def main():
     st.set_page_config(page_title="멍탐정 관리자", layout="wide")
     st.title("🐶 멍탐정 관리자 페이지 (API Client Mode)")
 
+    # 1. 세션 상태 초기화
     if "logged_in" not in st.session_state:
         st.session_state.logged_in = False
     
+    # 2. 로그인 상태이면, 무조건 메인 페이지 표시
     if st.session_state.logged_in:
         render_main_admin_page()
         return
 
+    # 3. 로그아웃 상태일 때의 로직
     api_client = ApiClient()
-    is_signup_mode_enabled = os.getenv("SECRET_SIGNUP_MODE") == "true"
+    
+    # 4. "비밀 가입 모드" 환경 변수 확인 및 상태 변수 설정
+    signup_mode_env_value = os.getenv("SECRET_SIGNUP_MODE", False)
+
+    # ==========================================================
+    # 💡 사이드바에 현재 설정 상태를 명확하게 표시
+    # ==========================================================
+    with st.sidebar:
+        st.header("⚙️ 앱 실행 상태")
+        st.write(f"환경 변수 `SECRET_SIGNUP_MODE`: `{signup_mode_env_value or '설정되지 않음'}`")
+        
+        # is_signup_mode_enabled의 bool 값에 따라 다른 아이콘과 색상으로 표시
+        if is_signup_mode_enabled:
+            st.success(f"➡️ 가입 모드 활성화됨: `{is_signup_mode_enabled}`")
+        else:
+            st.error(f"➡️ 가입 모드 비활성화됨: `{is_signup_mode_enabled}`")
+        st.caption("가입 모드가 활성화되어야 최초 관리자 생성이 가능합니다.")
+    # ==========================================================
 
     if is_signup_mode_enabled:
-        @st.cache_data(ttl=10) # 캐시 시간을 짧게 줄여 재시도 용이하게 함
+        # CASE 1: 비밀 가입 모드가 활성화된 경우
+        @st.cache_data(ttl=10)
         def get_superuser_existence_from_api():
             return api_client.check_superuser_exists()
 
         superuser_exists = get_superuser_existence_from_api()
 
-        # 👇 API 호출 결과를 세분화하여 처리
         if superuser_exists is None:
             # API 호출 실패
-            st.error(
-                "백엔드 API 서버에 연결할 수 없습니다. 관리자 앱 컨테이너의 네트워크 설정 또는 백엔드 서버의 상태를 확인해주세요."
-            )
+            st.error("백엔드 API 서버에 연결할 수 없습니다. 네트워크 설정을 확인해주세요.")
             st.code(f"호출 대상 API 주소: {api_client.base_url}/admin/superuser-exists")
             if st.button("재시도"):
-                # 캐시를 지우고 재시도할 수 있도록 함
                 st.cache_data.clear()
                 st.rerun()
 
@@ -228,6 +245,8 @@ def main():
             render_login_page()
 
     else:
+        # CASE 2: 비밀 가입 모드가 비활성화된 경우
+        # (사이드바에 이미 안내 메시지가 표시됨)
         render_login_page()
 
 if __name__ == "__main__":
