@@ -47,7 +47,7 @@
   // 3. 포트 포워딩 수정 (Streamlit 앱 포트만 지정)
   "forwardPorts": [8501],
 
-  // "postAttachCommand": "streamlit run admin_app.py",
+  "postAttachCommand": "streamlit run admin_app.py",
   
   // Dockerfile에 별도 USER 지시문이 없으므로 'root' 사용
   "remoteUser": "root"
