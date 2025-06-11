@@ -106,7 +106,7 @@ class ApiClient:
             return None
 
     # --- 메시지 API ---
-    def send_message(self, token: str, conversation_id: int, content: str) -> List[Dict[str, Any]] | None:
+    def send_message(self, token: str, conversation_id: int, content: str) -> Dict[str, Any] | None:
         headers = {"Authorization": f"Bearer {token}"}
         url = f"{self.base_url}/conversations/{conversation_id}/messages/"
         payload = {"content": content}
