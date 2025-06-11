@@ -1,4 +1,5 @@
-# api_client.py
+# streamlit_admin/api_client.py
+
 import os
 import requests
 from typing import Dict, Any, List
@@ -8,128 +9,112 @@ class ApiClient:
     FastAPI 백엔드와 통신하기 위한 클라이언트.
     """
     def __init__(self):
-        # 환경 변수에서 베이스 URL을 가져옴. 없으면 로컬 기본값 사용.
         self.base_url = os.getenv("FASTAPI_API_BASE_URL", "http://localhost:8000/api/v1")
 
+    # --- 인증 API ---
     def login_for_token(self, email: str, password: str) -> str | None:
-        """
-        이메일과 비밀번호로 로그인을 시도하고, 성공 시 JWT 액세스 토큰을 반환합니다.
-        """
-        login_data = {
-            'username': email, # FastAPI의 OAuth2PasswordRequestForm은 'username' 필드를 사용
-            'password': password
-        }
-        # ⭐️ 중요: FastAPI의 기본 로그인 엔드포인트는 /auth/token 입니다.
-        # 관리자 로그인을 위해 별도 엔드포인트를 만들거나, 기존 것을 활용합니다.
-        # 여기서는 기존 로그인 엔드포인트를 사용한다고 가정합니다.
-        url = f"{self.base_url}/auth/token" # FastAPI의 기본 로그인 URL
-        
+        login_data = {'username': email, 'password': password}
+        url = f"{self.base_url}/auth/token"
         try:
-            response = requests.post(url, data=login_data)
-            response.raise_for_status()  # 2xx 상태 코드가 아니면 예외 발생
-            
-            # FastAPI의 슈퍼유저 검증은 /auth/token이 아닌,
-            # /admin/** 엔드포인트 접근 시에 이루어집니다.
-            # 따라서 여기서는 토큰만 먼저 받아옵니다.
+            response = requests.post(url, data=login_data, timeout=5)
+            response.raise_for_status()
             return response.json().get("access_token")
         except requests.exceptions.RequestException as e:
             print(f"API 로그인 요청 실패: {e}")
             return None
 
-    def get_all_users(self, token: str) -> List[Dict[str, Any]] | None:
-        """
-        관리자용 엔드포인트에서 모든 사용자 목록을 가져옵니다.
-        """
-        headers = {"Authorization": f"Bearer {token}"}
-        url = f"{self.base_url}/admin/users"
-        
+    def check_superuser_exists(self) -> bool:
+        url = f"{self.base_url}/admin/superuser-exists"
         try:
-            response = requests.get(url, headers=headers)
+            response = requests.get(url, timeout=5)
             response.raise_for_status()
-            return response.json()
+            if isinstance(response.json(), bool):
+                return response.json()
+            return True
         except requests.exceptions.RequestException as e:
-            # 401 Unauthorized (슈퍼유저 아님) 또는 403 Forbidden 등의 에러가 여기서 잡힙니다.
-            print(f"사용자 목록 조회 실패: {e}")
-            if e.response is not None:
-                print(f"응답 내용: {e.response.text}")
-            return None
-        
-    def update_user(self, token: str, user_id: int, update_data: Dict[str, Any]) -> Dict[str, Any] | None:
-        """
-        관리자가 특정 사용자의 정보를 업데이트합니다.
-        """
-        headers = {"Authorization": f"Bearer {token}"}
-        url = f"{self.base_url}/admin/users/{user_id}"
-        
-        try:
-            response = requests.put(url, headers=headers, json=update_data)
-            response.raise_for_status()
-            return response.json()
-        except requests.exceptions.RequestException as e:
-            print(f"사용자 정보 업데이트 실패 (ID: {user_id}): {e}")
-            if e.response is not None:
-                print(f"응답 내용: {e.response.text}")
-            return None
+            print(f"슈퍼유저 존재 여부 확인 실패: {e}")
+            return True
 
-    def delete_user(self, token: str, user_id: int) -> Dict[str, Any] | None:
-        """
-        관리자가 특정 사용자를 삭제합니다.
-        """
-        headers = {"Authorization": f"Bearer {token}"}
-        url = f"{self.base_url}/admin/users/{user_id}"
-        
-        try:
-            response = requests.delete(url, headers=headers)
-            response.raise_for_status()
-            return response.json()
-        except requests.exceptions.RequestException as e:
-            print(f"사용자 삭제 실패 (ID: {user_id}): {e}")
-            if e.response is not None:
-                print(f"응답 내용: {e.response.text}")
-            return None
-        
     def create_initial_superuser(self, email: str, password: str) -> Dict[str, Any] | None:
-        """
-        최초 슈퍼유저 생성을 요청합니다.
-        """
         url = f"{self.base_url}/admin/initial-superuser"
         payload = {"email": email, "password": password}
-        
         try:
-            response = requests.post(url, json=payload)
-            response.raise_for_status() # 201 Created가 아니면 예외 발생
+            response = requests.post(url, json=payload, timeout=5)
+            response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
             print(f"최초 슈퍼유저 생성 실패: {e}")
-            if e.response is not None:
-                # 에러 메시지를 UI에 표시하기 위해 응답 내용을 반환
-                try:
-                    return e.response.json()
-                except:
-                    return {"detail": e.response.text}
-            return {"detail": str(e)}
-        
+            try:
+                return e.response.json() if e.response else {"detail": str(e)}
+            except:
+                return {"detail": str(e)}
 
-    def check_superuser_exists(self) -> bool | None:
-        """
-        백엔드에 슈퍼유저가 존재하는지 확인합니다.
-        - 성공 시: True 또는 False 반환
-        - API 호출 실패 시: None 반환
-        """
-        url = f"{self.base_url}/admin/superuser-exists"
+    # --- 사용자 관리 API ---
+    def get_all_users(self, token: str) -> List[Dict[str, Any]] | None:
+        headers = {"Authorization": f"Bearer {token}"}
+        url = f"{self.base_url}/admin/users"
         try:
-            # 💡 타임아웃을 적절히 설정하여 무한 대기 방지
-            response = requests.get(url, timeout=5) # 5초 타임아웃
+            response = requests.get(url, headers=headers, timeout=5)
             response.raise_for_status()
-            
-            result = response.json()
-            if isinstance(result, bool):
-                print(f"API 응답 (superuser_exists): {result}")
-                return result
-            else:
-                # 예상치 못한 응답 형태는 에러로 간주
-                print(f"오류: 슈퍼유저 존재 여부 확인 API가 bool이 아닌 값을 반환했습니다: {result}")
-                return None
+            return response.json()
         except requests.exceptions.RequestException as e:
-            print(f"API 호출 오류 (check_superuser_exists): {e}")
+            print(f"사용자 목록 조회 실패: {e}")
+            return None
+
+    # --- 페르소나 관리 API ---
+    def get_personas(self, token: str) -> List[Dict[str, Any]] | None:
+        headers = {"Authorization": f"Bearer {token}"}
+        url = f"{self.base_url}/personas/"
+        try:
+            response = requests.get(url, headers=headers, timeout=5)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"페르소나 목록 조회 실패: {e}")
+            return None
+
+    def create_persona(self, token: str, name: str, system_prompt: str, description: str | None) -> Dict[str, Any] | None:
+        headers = {"Authorization": f"Bearer {token}"}
+        url = f"{self.base_url}/personas/"
+        payload = {
+            "name": name,
+            "system_prompt": system_prompt,
+            "description": description,
+            "is_public": True
+        }
+        try:
+            response = requests.post(url, headers=headers, json=payload, timeout=5)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"페르소나 생성 실패: {e}")
+            return None
+
+    # --- 대화방 관리 API ---
+    def create_conversation(self, token: str, persona_id: int, title: str | None) -> Dict[str, Any] | None:
+        headers = {"Authorization": f"Bearer {token}"}
+        url = f"{self.base_url}/conversations/"
+        payload = {"persona_id": persona_id}
+        if title:
+            payload["title"] = title
+        try:
+            response = requests.post(url, headers=headers, json=payload, timeout=5)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"대화방 생성 실패: {e}")
+            return None
+
+    # --- 메시지 API ---
+    def send_message(self, token: str, conversation_id: int, content: str) -> List[Dict[str, Any]] | None:
+        headers = {"Authorization": f"Bearer {token}"}
+        url = f"{self.base_url}/conversations/{conversation_id}/messages/"
+        payload = {"content": content}
+        try:
+            # AI 응답은 시간이 걸릴 수 있으므로 타임아웃을 길게 설정
+            response = requests.post(url, headers=headers, json=payload, timeout=30)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"메시지 전송 실패: {e}")
             return None

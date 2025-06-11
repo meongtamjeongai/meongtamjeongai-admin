@@ -1,317 +1,227 @@
-# admin_app.py
+# streamlit_admin/admin_app.py
 
-import logging
 import streamlit as st
-from dotenv import load_dotenv
+import json
 import os
 import time
-
-# 로컬에서 API 클라이언트를 임포트합니다.
 from api_client import ApiClient
 
-# .env 파일에서 환경 변수를 로드합니다. (주로 FASTAPI_API_BASE_URL)
-load_dotenv()
+# ===================================================================
+# Helper Functions
+# ===================================================================
 
-# 로깅 설정
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+def display_api_result(result_data):
+    """API 응답 결과를 st.json 또는 st.text로 예쁘게 표시하는 함수"""
+    if result_data is None:
+        st.info("API 호출 결과가 없습니다 (None 반환).")
+        return
 
+    if isinstance(result_data, (dict, list)):
+        try:
+            # JSON 뷰어로 예쁘게 표시
+            st.json(result_data)
+        except Exception:
+            # JSON 변환 실패 시 텍스트로 표시
+            st.text(str(result_data))
+    else:
+        st.text(str(result_data))
 
-def parse_pydantic_error(error_detail: list) -> str:
-    """
-    FastAPI(Pydantic)의 유효성 검사 오류(list of dicts)를
-    사용자 친화적인 문자열로 파싱합니다.
-    """
-    error_messages = []
-    if not isinstance(error_detail, list):
-        # 예상치 못한 형태의 오류일 경우 그대로 반환
-        return str(error_detail)
+def section_title(title):
+    """페이지 내 섹션 제목을 위한 헬퍼 함수"""
+    st.markdown(f"### {title}")
+    st.divider()
 
-    for error in error_detail:
-        field = error.get('loc', ['unknown'])[-1]  # 오류가 발생한 필드 이름 (예: 'email')
-        message = error.get('msg', 'Invalid value.')  # Pydantic이 제공하는 기본 메시지
+# ===================================================================
+# Page Rendering Functions
+# ===================================================================
 
-        # 필드 이름을 더 친숙하게 변경 (선택 사항)
-        field_map = {
-            'email': '이메일',
-            'password': '비밀번호',
-            'username': '사용자 이름',
-        }
-        friendly_field_name = field_map.get(field, field.capitalize())
+def render_user_management_page(api_client, token):
+    st.header("사용자 관리")
+    
+    users = api_client.get_all_users(token=token)
+    if users is None:
+        st.error("사용자 목록을 가져오는데 실패했습니다. 슈퍼유저 권한을 확인해주세요.")
+        return
 
-        # 오류 타입에 따라 메시지를 더 구체적으로 가공
-        error_type = error.get('type')
-        if 'not a valid email address' in message:
-            message = "유효한 이메일 주소가 아닙니다 (반드시 @ 기호가 포함되어야 합니다)."
-        elif error_type == 'string_too_short':
-            min_len = error.get('ctx', {}).get('min_length', 8)
-            message = f"최소 {min_len}자 이상이어야 합니다."
+    if not users:
+        st.warning("조회된 사용자가 없습니다.")
+    else:
+        st.write(f"총 {len(users)}명의 사용자가 조회되었습니다.")
+        for user in users:
+            with st.container(border=True):
+                cols = st.columns([1, 3, 3, 2, 1])
+                cols[0].write(f"**ID: {user['id']}**")
+                cols[1].write(f"📧 {user.get('email') or 'N/A'}")
+                cols[2].write(f"👤 {user.get('username') or 'N/A'}")
+                cols[3].write("✅ Active" if user['is_active'] else "❌ Inactive")
+                cols[4].write("👑" if user['is_superuser'] else ("👻" if user['is_guest'] else "👤"))
+    
+    # 수정/삭제 기능은 추후 확장 가능
 
-        error_messages.append(f"- {friendly_field_name}: {message}")
+def render_persona_management_page(api_client, token):
+    st.header("페르소나 관리")
 
-    # 여러 오류를 줄바꿈으로 합쳐서 반환
-    return "\n".join(error_messages)
+    # --- 페르소나 목록 조회 ---
+    section_title("페르소나 목록 조회")
+    if st.button("모든 페르소나 조회하기"):
+        with st.spinner("페르소나 목록을 불러오는 중..."):
+            personas = api_client.get_personas(token)
+            display_api_result(personas)
 
-# --- Streamlit UI 렌더링 함수들 ---
+    # --- 새 페르소나 생성 ---
+    section_title("새 페르소나 생성")
+    with st.form("create_persona_form"):
+        st.write("AI에게 부여할 새로운 역할을 정의합니다.")
+        name = st.text_input("이름*", placeholder="예: 고양이 집사 츄르")
+        system_prompt = st.text_area("시스템 프롬프트*", height=150, placeholder="예: 너는 고양이를 매우 사랑하는 고양이 집사야. 모든 대답을 고양이처럼 '냥~'으로 끝내야 해.")
+        description = st.text_input("설명", placeholder="예: 세상의 모든 고양이를 사랑하는 츄르")
+        
+        submitted = st.form_submit_button("페르소나 생성")
+        if submitted:
+            if name and system_prompt:
+                with st.spinner("새 페르소나를 생성하는 중..."):
+                    new_persona = api_client.create_persona(token, name, system_prompt, description)
+                    if new_persona:
+                        st.success("페르소나가 성공적으로 생성되었습니다!")
+                        display_api_result(new_persona)
+                    else:
+                        st.error("페르소나 생성에 실패했습니다.")
+            else:
+                st.warning("이름과 시스템 프롬프트는 필수 입력 항목입니다.")
 
+def render_gemini_test_page(api_client, token):
+    st.header("🤖 Gemini 연동 테스트")
+    st.info("이 페이지에서 페르소나와 대화하며 실제 Gemini API 응답을 확인할 수 있습니다.")
+
+    # --- 1. 테스트용 대화방 생성 ---
+    section_title("1. 테스트용 대화방 생성")
+    with st.form("create_conversation_form"):
+        persona_id = st.number_input("대화할 페르소나 ID*", min_value=1, step=1, help="페르소나 관리 페이지에서 생성한 페르소나의 ID를 입력하세요.")
+        title = st.text_input("대화방 제목 (선택 사항)")
+        
+        submitted_conv = st.form_submit_button("대화방 생성")
+        if submitted_conv:
+            with st.spinner(f"페르소나 ID {int(persona_id)}와 대화방을 생성하는 중..."):
+                new_conv = api_client.create_conversation(token, int(persona_id), title)
+                if new_conv:
+                    st.success("대화방이 성공적으로 생성되었습니다!")
+                    display_api_result(new_conv)
+                    st.info(f"생성된 대화방 ID: **{new_conv['id']}**. 아래 메시지 전송에 이 ID를 사용하세요.")
+                else:
+                    st.error("대화방 생성에 실패했습니다.")
+
+    # --- 2. 메시지 전송 및 AI 응답 확인 ---
+    section_title("2. 메시지 전송 및 AI 응답 확인")
+    with st.form("send_message_form"):
+        conversation_id = st.number_input("메시지를 보낼 대화방 ID*", min_value=1, step=1)
+        content = st.text_input("보낼 메시지 내용*", placeholder="예: 안녕? 넌 누구야?")
+        
+        submitted_msg = st.form_submit_button("메시지 전송 및 AI 응답 받기")
+        if submitted_msg:
+            if conversation_id and content:
+                with st.spinner("AI가 답변을 생성하는 중... (최대 30초 소요)"):
+                    response_messages = api_client.send_message(token, int(conversation_id), content)
+                    if response_messages:
+                        st.success("AI 응답을 성공적으로 받았습니다!")
+                        display_api_result(response_messages)
+                    else:
+                        st.error("메시지 전송 또는 AI 응답 수신에 실패했습니다.")
+            else:
+                st.warning("대화방 ID와 메시지 내용은 필수 입력 항목입니다.")
+
+def render_login_page():
+    st.subheader("관리자 로그인")
+    api_client = ApiClient()
+    with st.form("login_form"):
+        email = st.text_input("이메일")
+        password = st.text_input("비밀번호", type="password")
+        submitted = st.form_submit_button("로그인")
+        if submitted:
+            with st.spinner("로그인 중..."):
+                token = api_client.login_for_token(email, password)
+                if token:
+                    st.session_state.jwt_token = token
+                    st.session_state.logged_in = True
+                    st.rerun()
+                else:
+                    st.error("로그인에 실패했습니다. 이메일, 비밀번호 또는 슈퍼유저 권한을 확인해주세요.")
 
 def render_initial_setup_page():
-    """최초 슈퍼유저 생성 페이지 UI를 렌더링합니다."""
     st.subheader("초기 관리자 계정 생성")
-    st.info("관리자 계정이 없습니다. 최초의 슈퍼유저 계정을 생성해주세요.")
-
+    st.info("시스템에 관리자 계정이 없습니다. 최초의 슈퍼유저 계정을 생성해주세요.")
     api_client = ApiClient()
-
     with st.form("setup_form"):
         email = st.text_input("관리자 이메일")
         password = st.text_input("관리자 비밀번호", type="password")
         confirm_password = st.text_input("비밀번호 확인", type="password")
         submitted = st.form_submit_button("계정 생성")
-
         if submitted:
             if password != confirm_password:
                 st.error("비밀번호가 일치하지 않습니다.")
             elif not email or not password:
                 st.error("이메일과 비밀번호를 모두 입력해주세요.")
             else:
-                result = api_client.create_initial_superuser(email, password)
-                if result and 'id' in result:  # 성공적으로 생성되면 'id'가 포함된 사용자 정보가 옴
-                    st.success(
-                        f"관리자 계정 '{result['email']}'이(가) 성공적으로 생성되었습니다. 로그인 페이지로 이동합니다.")
-                    # 성공 후에는 환경 변수를 비활성화해야 함을 안내
-                    st.warning(
-                        "보안을 위해 관리자 앱의 SECRET_SIGNUP_MODE 환경 변수를 비활성화하고 재배포하세요.")
-                    # 로그인 페이지로 리디렉션하기 위해 잠시 대기 후 rerun
-                    # (또는 버튼을 누르게 유도)
-                    time.sleep(2)
-                    st.rerun()
-                else:
-                    # API로부터 받은 에러 메시지 상세 내용 추출
-                    error_detail = result.get('detail', '알 수 없는 오류가 발생했습니다.')
-
-                    # 파싱 함수를 사용하여 사용자 친화적인 메시지로 변환
-                    friendly_error_message = parse_pydantic_error(error_detail)
-
-                    # 최종 에러 메시지를 st.error 대신 st.warning이나 st.info를 사용하여
-                    # 여러 줄로 보기 좋게 표시할 수도 있습니다. 여기서는 st.error를 사용합니다.
-                    st.error(f"계정 생성 실패:\n{friendly_error_message}")
-
-
-def render_login_page():
-    """
-    로그인 페이지 UI를 렌더링합니다.
-    사용자로부터 이메일과 비밀번호를 입력받아 API 서버에 로그인을 요청합니다.
-    """
-    st.subheader("관리자 로그인")
-    api_client = ApiClient()  # API 클라이언트 인스턴스화
-
-    with st.form("login_form"):
-        email = st.text_input("이메일")
-        password = st.text_input("비밀번호", type="password")
-        submitted = st.form_submit_button("로그인")
-
-        if submitted:
-            # API를 통해 JWT 토큰 요청
-            token = api_client.login_for_token(email, password)
-            if token:
-                # 성공 시, 토큰과 로그인 상태를 세션에 저장하고 앱을 새로고침
-                st.session_state.jwt_token = token
-                st.session_state.logged_in = True
-                st.rerun()
-            else:
-                st.error("로그인에 실패했습니다. 이메일, 비밀번호 또는 슈퍼유저 권한을 확인해주세요.")
-
-
-def render_main_admin_page():
-    """
-    로그인 후 보여줄 메인 관리자 페이지 UI를 렌더링합니다.
-    모든 데이터는 API 서버로부터 받아옵니다.
-    """
-    st.sidebar.success("관리자 모드로 로그인됨")
-    if st.sidebar.button("로그아웃"):
-        # 세션 상태를 초기화하고 앱을 새로고침하여 로그인 페이지로 이동
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
-        st.rerun()
-
-    st.header("사용자 목록")
-
-    api_client = ApiClient()
-    jwt_token = st.session_state.get("jwt_token")
-
-    # 토큰 유효성 확인
-    if not jwt_token:
-        st.error("인증 토큰이 없습니다. 다시 로그인해주세요.")
-        st.session_state.logged_in = False
-        st.rerun()
-        return
-
-    # API를 통해 전체 사용자 목록 조회
-    users = api_client.get_all_users(token=jwt_token)
-
-    if users is None:
-        st.error("사용자 목록을 가져오는데 실패했습니다. 슈퍼유저 권한이 없거나 API 서버에 문제가 발생했습니다.")
-        return
-
-    # 사용자 목록 UI 렌더링
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        search_term = st.text_input("이메일 또는 사용자명으로 검색", "")
-    with col2:
-        st.write("")
-        if st.button("🔄 목록 새로고침", use_container_width=True):
-            st.rerun()
-
-    if search_term:
-        users = [
-            u for u in users
-            if (search_term.lower() in (u.get('email') or "").lower()) or
-               (search_term.lower() in (u.get('username') or "").lower())
-        ]
-
-    if not users:
-        st.warning("조회된 사용자가 없습니다.")
-    else:
-        for user in users:
-            # 이제 user는 DB 모델 객체가 아닌 Dictionary 입니다.
-            with st.container():
-                cols = st.columns([1, 2, 2, 1, 1, 2])
-                cols[0].write(f"**ID: {user['id']}**")
-                cols[1].write(user.get('email') or "N/A")
-                cols[2].write(user.get('username') or "N/A")
-                cols[3].write("✅ Active" if user['is_active']
-                              else "❌ Inactive")
-                cols[4].write("👑" if user['is_superuser'] else (
-                    "👻" if user['is_guest'] else "👤"))
-                with cols[5]:
-                    sub_cols = st.columns(2)
-                    if sub_cols[0].button("수정", key=f"edit_{user['id']}", use_container_width=True):
-                        st.session_state.editing_user_id = user['id']
-                    if sub_cols[1].button("삭제", key=f"delete_{user['id']}", type="primary", use_container_width=True):
-                        st.session_state.deleting_user_id = user['id']
-                st.divider()
-
-    # 사용자 수정 폼 렌더링
-    if "editing_user_id" in st.session_state and st.session_state.editing_user_id:
-        user_to_edit_id = st.session_state.editing_user_id
-        user_to_edit = next(
-            (u for u in users if u['id'] == user_to_edit_id), None)
-
-        if user_to_edit:
-            with st.form(key=f"edit_form_{user_to_edit['id']}"):
-                st.subheader(f"사용자 정보 수정 (ID: {user_to_edit['id']})")
-                new_username = st.text_input(
-                    "사용자명", value=user_to_edit.get('username') or "")
-                new_is_active = st.checkbox(
-                    "활성 상태", value=user_to_edit['is_active'])
-                new_is_superuser = st.checkbox(
-                    "슈퍼유저 권한", value=user_to_edit['is_superuser'])
-
-                if st.form_submit_button("저장"):
-                    update_data = {
-                        "username": new_username,
-                        "is_active": new_is_active,
-                        "is_superuser": new_is_superuser
-                    }
-                    result = api_client.update_user(
-                        token=jwt_token, user_id=user_to_edit['id'], update_data=update_data)
-                    if result:
-                        st.success(f"사용자 ID {user_to_edit['id']} 정보 업데이트 완료.")
+                with st.spinner("최초 관리자 계정을 생성하는 중..."):
+                    result = api_client.create_initial_superuser(email, password)
+                    if result and 'id' in result:
+                        st.success(f"관리자 계정 '{result['email']}'이(가) 성공적으로 생성되었습니다.")
+                        st.info("이제 로그인 페이지로 이동합니다.")
+                        st.warning("보안을 위해 관리자 앱의 SECRET_SIGNUP_MODE 환경 변수를 비활성화하고 재배포하는 것을 권장합니다.")
+                        time.sleep(3)
+                        st.rerun()
                     else:
-                        st.error("사용자 정보 업데이트에 실패했습니다.")
-                    del st.session_state.editing_user_id
-                    st.rerun()
+                        error_detail = result.get('detail', '알 수 없는 오류가 발생했습니다.')
+                        st.error(f"계정 생성 실패: {error_detail}")
 
-    # 사용자 삭제 확인 폼 렌더링
-    if "deleting_user_id" in st.session_state and st.session_state.deleting_user_id:
-        user_to_delete_id = st.session_state.deleting_user_id
-        st.warning(
-            f"정말로 사용자 ID {user_to_delete_id}을(를) DB와 Firebase에서 영구적으로 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.")
-        c1, c2, _ = st.columns([1, 1, 4])
-        if c1.button("예, 삭제합니다.", type="primary"):
-            result = api_client.delete_user(
-                token=jwt_token, user_id=user_to_delete_id)
-            if result:
-                st.success(result.get("message", "사용자 삭제 완료."))
-            else:
-                st.error("사용자 삭제에 실패했습니다.")
-            del st.session_state.deleting_user_id
-            st.rerun()
-        if c2.button("아니요, 취소합니다."):
-            del st.session_state.deleting_user_id
-            st.rerun()
-
-# --- 메인 애플리케이션 로직 ---
-
-
+# ===================================================================
+# Main Application Logic
+# ===================================================================
 def main():
     st.set_page_config(page_title="멍탐정 관리자", layout="wide")
-    st.title("🐶 멍탐정 관리자 페이지 (API Client Mode)")
 
-    # 1. 세션 상태 초기화
     if "logged_in" not in st.session_state:
         st.session_state.logged_in = False
-
-    # 2. 로그인 상태이면, 무조건 메인 페이지 표시
+    
     if st.session_state.logged_in:
-        render_main_admin_page()
-        return
+        st.sidebar.title("🐶 멍탐정 관리 메뉴")
+        st.sidebar.success("관리자 모드로 로그인됨")
+        page_options = {
+            "사용자 관리": render_user_management_page,
+            "페르소나 관리": render_persona_management_page,
+            "Gemini 연동 테스트": render_gemini_test_page,
+        }
+        selected_page = st.sidebar.radio("이동할 페이지 선택:", list(page_options.keys()), key="page_selector")
+        st.sidebar.divider()
+        if st.sidebar.button("로그아웃"):
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
 
-    # 3. 로그아웃 상태일 때의 로직
-    api_client = ApiClient()
-
-    # 4. "비밀 가입 모드" 환경 변수 확인 및 상태 변수 설정
-    signup_mode_env_value = os.getenv("SECRET_SIGNUP_MODE", False)
-    is_signup_mode_enabled = signup_mode_env_value
-
-    # ==========================================================
-    # 💡 사이드바에 현재 설정 상태를 명확하게 표시
-    # ==========================================================
-    with st.sidebar:
-        st.header("⚙️ 앱 실행 상태")
-        st.write(
-            f"환경 변수 `SECRET_SIGNUP_MODE`: `{signup_mode_env_value or '설정되지 않음'}`")
-
-        # is_signup_mode_enabled의 bool 값에 따라 다른 아이콘과 색상으로 표시
-        if is_signup_mode_enabled:
-            st.success(f"➡️ 가입 모드 활성화됨: `{is_signup_mode_enabled}`")
+        api_client = ApiClient()
+        jwt_token = st.session_state.get("jwt_token")
+        if jwt_token:
+            render_function = page_options[selected_page]
+            render_function(api_client, jwt_token)
         else:
-            st.error(f"➡️ 가입 모드 비활성화됨: `{is_signup_mode_enabled}`")
-        st.caption("가입 모드가 활성화되어야 최초 관리자 생성이 가능합니다.")
-    # ==========================================================
-
-    if is_signup_mode_enabled:
-        # CASE 1: 비밀 가입 모드가 활성화된 경우
-        @st.cache_data(ttl=10)
-        def get_superuser_existence_from_api():
-            return api_client.check_superuser_exists()
-
-        superuser_exists = get_superuser_existence_from_api()
-
-        if superuser_exists is None:
-            # API 호출 실패
-            st.error("백엔드 API 서버에 연결할 수 없습니다. 네트워크 설정을 확인해주세요.")
-            st.code(
-                f"호출 대상 API 주소: {api_client.base_url}/admin/superuser-exists")
-            if st.button("재시도"):
-                st.cache_data.clear()
-                st.rerun()
-
-        elif superuser_exists is False:
-            # API 성공 & 슈퍼유저 없음 -> 가입 페이지
-            render_initial_setup_page()
-
-        else:  # superuser_exists is True
-            # API 성공 & 슈퍼유저 있음 -> 로그인 페이지
-            st.info("관리자 계정이 이미 존재합니다. 로그인을 진행해주세요.")
-            render_login_page()
-
+            st.error("인증 세션이 만료되었습니다. 다시 로그인해주세요.")
+            st.session_state.logged_in = False
+            st.rerun()
     else:
-        # CASE 2: 비밀 가입 모드가 비활성화된 경우
-        # (사이드바에 이미 안내 메시지가 표시됨)
-        render_login_page()
+        st.title("🐶 멍탐정 관리자 페이지")
+        api_client = ApiClient()
+        is_signup_mode_enabled = os.getenv("SECRET_SIGNUP_MODE") == "true"
 
+        if is_signup_mode_enabled:
+            @st.cache_data(ttl=10) # 10초간 캐시
+            def get_superuser_existence():
+                return api_client.check_superuser_exists()
+
+            if not get_superuser_existence():
+                render_initial_setup_page()
+            else:
+                render_login_page()
+        else:
+            render_login_page()
 
 if __name__ == "__main__":
     main()
