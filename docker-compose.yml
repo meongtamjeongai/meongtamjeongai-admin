@@ -13,6 +13,9 @@ services:
     # 포트 연결
     ports:
       - "8501:8501"
+    # 🌟 이 부분을 추가하세요! 호스트의 현재 디렉토리를 컨테이너의 /app에 마운트합니다.
+    volumes:
+      - .:/app
     # meong 네트워크에 연결
     networks:
       - meong
