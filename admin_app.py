@@ -738,37 +738,86 @@ def render_phishing_case_management_page(api_client, token):
                                     st.rerun()
 
 
-def render_persona_management_page(api_client, token):
-    """페르소나 관리 페이지 UI를 렌더링합니다. (개선된 UI/UX 적용)"""
+def render_persona_management_page(api_client: ApiClient, token: str):
+    """
+    페르소나 관리 페이지 UI를 렌더링합니다.
+    (이미지 업로드/조회 기능이 통합된 최종 버전)
+    """
     st.header("페르소나 관리")
 
+    # --- 데이터 로드 및 캐싱 ---
     @st.cache_data(ttl=60)
     def get_personas_data():
+        """API를 통해 페르소나 목록을 가져와 캐싱합니다."""
         return api_client.get_personas(token)
 
-    # ⭐️ [개선 3] 수정/삭제 상태를 세션에서 관리
+    # --- 세션 상태 초기화 ---
+    # 사용자가 '관리하기' 버튼을 눌렀을 때 수정할 페르소나의 ID를 저장합니다.
     if "editing_persona_id" not in st.session_state:
         st.session_state.editing_persona_id = None
 
     # --- 1. 수정/삭제 뷰 렌더링 ---
+    # `editing_persona_id`가 세션에 설정되어 있으면, 목록 대신 수정 뷰를 먼저 보여줍니다.
     if st.session_state.editing_persona_id:
         all_personas = get_personas_data()
+        # 전체 페르소나 목록에서 수정할 페르소나 객체를 찾습니다.
         persona_to_edit = next(
             (p for p in all_personas if p["id"] == st.session_state.editing_persona_id),
             None,
         )
 
+        # 페르소나를 찾지 못한 경우 (예: 다른 브라우저에서 삭제된 경우)
         if persona_to_edit is None:
             st.error("수정할 페르소나를 찾을 수 없습니다. 목록으로 돌아갑니다.")
             st.session_state.editing_persona_id = None
             st.rerun()
             return
 
+        # --- 수정 폼 ---
         section_title(f"페르소나 관리 (ID: {persona_to_edit['id']})")
-
-        # 수정 폼
         with st.form(key=f"update_form_persona_{persona_to_edit['id']}"):
             st.subheader("페르소나 정보 수정")
+
+            # --- 이미지 표시 및 업로드 UI ---
+            img_c1, form_c1 = st.columns(2)
+
+            with img_c1:
+                st.markdown("**프로필 이미지**")
+                current_image_key = persona_to_edit.get("profile_image_key")
+                # 현재 이미지 키가 DB에 저장되어 있다면
+                if current_image_key:
+                    with st.spinner("이미지 로딩 중..."):
+                        # 다운로드용 Presigned URL을 받아옵니다.
+                        download_url = api_client.get_presigned_url_for_download(
+                            current_image_key
+                        )
+                    if download_url:
+                        st.image(
+                            download_url,
+                            caption=f"현재 이미지 ({current_image_key})",
+                            use_column_width=True,
+                        )
+                        # 이미지 삭제 체크박스
+                        if st.checkbox(
+                            "이미지 삭제", key=f"delete_img_{persona_to_edit['id']}"
+                        ):
+                            st.warning("저장 시 현재 이미지가 삭제됩니다.")
+                    else:
+                        st.error("이미지를 불러올 수 없습니다.")
+                else:
+                    st.info("등록된 프로필 이미지가 없습니다.")
+
+            with form_c1:
+                # 새 이미지 업로드를 위한 파일 업로더
+                uploaded_file = st.file_uploader(
+                    "새 프로필 이미지 업로드",
+                    type=["png", "jpg", "jpeg", "webp"],
+                    help="새 이미지를 업로드하면 기존 이미지를 대체합니다.",
+                )
+
+            st.divider()
+
+            # --- 텍스트 정보 입력 필드 ---
             name = st.text_input("이름", value=persona_to_edit["name"])
             desc = st.text_input("설명", value=persona_to_edit.get("description", ""))
             prompt = st.text_area(
@@ -776,29 +825,72 @@ def render_persona_management_page(api_client, token):
             )
             is_public = st.checkbox("공개", value=persona_to_edit["is_public"])
 
-            c1, c2 = st.columns(2)
-            if c1.form_submit_button(
+            # --- 저장/취소 버튼 ---
+            btn_c1, btn_c2 = st.columns(2)
+            if btn_c1.form_submit_button(
                 "저장하기", use_container_width=True, type="primary"
             ):
+                # --- 이미지 처리 로직 ---
+                final_image_key = persona_to_edit.get("profile_image_key")
+
+                # 1. 새 파일이 업로드된 경우
+                if uploaded_file is not None:
+                    with st.spinner("이미지 업로드 중..."):
+                        file_bytes = uploaded_file.getvalue()
+                        # 1-1. 업로드용 URL 요청
+                        presigned_data = api_client.get_presigned_url_for_upload(
+                            token=token,
+                            filename=uploaded_file.name,
+                            category="personas",
+                        )
+                        if presigned_data:
+                            # 1-2. S3에 실제 파일 업로드
+                            upload_success = api_client.upload_file_to_s3(
+                                presigned_url=presigned_data["url"],
+                                file_data=file_bytes,
+                                content_type=uploaded_file.type,
+                            )
+                            if upload_success:
+                                final_image_key = presigned_data["object_key"]
+                                st.toast("✅ 이미지가 성공적으로 업로드되었습니다.")
+                            else:
+                                st.error("S3에 이미지를 업로드하는 데 실패했습니다.")
+                                final_image_key = None  # 업로드 실패 시 키 초기화
+                        else:
+                            st.error("이미지 업로드 URL을 받아오는 데 실패했습니다.")
+                            final_image_key = None  # URL 요청 실패 시 키 초기화
+
+                # 2. '이미지 삭제'가 체크된 경우
+                elif st.session_state.get(f"delete_img_{persona_to_edit['id']}", False):
+                    final_image_key = None
+                    st.toast("🗑️ 이미지가 삭제되도록 설정되었습니다.")
+
+                # --- 페르소나 정보 업데이트 API 호출 ---
                 update_data = {
                     "name": name,
                     "description": desc,
                     "system_prompt": prompt,
                     "is_public": is_public,
+                    "profile_image_key": final_image_key,  # 최종 이미지 키 값으로 업데이트
                 }
-                if api_client.update_persona(token, persona_to_edit["id"], update_data):
-                    st.success("페르소나 정보가 성공적으로 업데이트되었습니다.")
-                    st.cache_data.clear()
-                    st.session_state.editing_persona_id = None
-                    time.sleep(1)
-                    st.rerun()
-                else:
-                    st.error("업데이트에 실패했습니다.")
-            if c2.form_submit_button("취소", use_container_width=True):
+
+                with st.spinner("페르소나 정보 저장 중..."):
+                    if api_client.update_persona(
+                        token, persona_to_edit["id"], update_data
+                    ):
+                        st.success("페르소나 정보가 성공적으로 업데이트되었습니다.")
+                        st.cache_data.clear()
+                        st.session_state.editing_persona_id = None
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("페르소나 정보 업데이트에 실패했습니다.")
+
+            if btn_c2.form_submit_button("취소", use_container_width=True):
                 st.session_state.editing_persona_id = None
                 st.rerun()
 
-        # 삭제 섹션
+        # --- 삭제 섹션 ---
         with st.expander("페르소나 삭제하기", expanded=False):
             st.error(
                 "주의: 이 작업은 되돌릴 수 없으며, 관련된 대화방도 영향을 받을 수 있습니다."
@@ -819,6 +911,7 @@ def render_persona_management_page(api_client, token):
         return  # 수정 뷰를 렌더링했으면 여기서 함수 실행 종료
 
     # --- 2. 목록 및 생성 뷰 렌더링 ---
+    # `editing_persona_id`가 없을 때만 이 부분이 실행됩니다.
     tab1, tab2 = st.tabs(["페르소나 목록", "새 페르소나 생성"])
 
     # '페르소나 목록' 탭
@@ -828,22 +921,41 @@ def render_persona_management_page(api_client, token):
             st.rerun()
 
         personas = get_personas_data()
-
         if personas is None:
             st.error(
                 "페르소나 목록을 가져오는 데 실패했습니다. API 서버 연결 상태를 확인해주세요."
             )
-            return  # 함수를 즉시 종료하여 아래 코드 실행을 방지
+            return
 
         st.write(f"총 {len(personas)}개의 페르소나가 조회되었습니다.")
         st.divider()
 
+        # 각 페르소나를 카드 형태로 표시
         for p in personas:
             with st.container(border=True):
-                c1, c2 = st.columns([4, 1])
+                c1, c2 = st.columns([1, 3])
+
+                # --- 이미지 표시 컬럼 ---
                 with c1:
+                    image_key = p.get("profile_image_key")
+                    if image_key:
+                        # 다운로드 URL을 캐싱하여 반복적인 API 호출 방지
+                        @st.cache_data(ttl=3600)
+                        def get_cached_download_url(key):
+                            return api_client.get_presigned_url_for_download(key)
+
+                        img_url = get_cached_download_url(image_key)
+                        if img_url:
+                            st.image(img_url, width=150)
+                        else:
+                            st.caption("이미지 로드 실패")
+                    else:
+                        # 이미지가 없을 경우 Placeholder 표시
+                        st.image("https://placehold.co/150", width=150)
+
+                # --- 정보 및 관리 버튼 컬럼 ---
+                with c2:
                     st.subheader(f"ID {p['id']}: {p['name']}")
-                    # ⭐️ [개선 2] 설명 필드 추가
                     st.caption(f"설명: {p.get('description') or '없음'}")
                     st.text_area(
                         "System Prompt",
@@ -852,8 +964,7 @@ def render_persona_management_page(api_client, token):
                         disabled=True,
                         key=f"prompt_{p['id']}",
                     )
-                with c2:
-                    # ⭐️ [개선 3] '관리하기' 버튼으로 통합
+                    # '관리하기' 버튼을 누르면 세션 상태를 변경하고 앱을 다시 실행
                     if st.button(
                         "관리하기",
                         key=f"manage_persona_{p['id']}",
@@ -870,27 +981,74 @@ def render_persona_management_page(api_client, token):
             description = st.text_input(
                 "설명", placeholder="예: 불법 사금융 및 보이스피싱 피해 예방 전문가"
             )
+
+            # ⭐️ [신규] 이미지 업로드 위젯 추가
+            uploaded_file = st.file_uploader(
+                "프로필 이미지 (선택 사항)", type=["png", "jpg", "jpeg", "webp"]
+            )
+
             system_prompt = st.text_area(
                 "시스템 프롬프트*",
                 height=150,
                 placeholder="예: 너는 금융감독원의 '김민준 주임'이야...",
             )
-            if st.form_submit_button("페르소나 생성", use_container_width=True):
-                if name and system_prompt:
-                    if api_client.create_persona(
-                        token, name, system_prompt, description
-                    ):
+
+            submitted = st.form_submit_button("페르소나 생성", use_container_width=True)
+
+            if submitted:
+                if not name or not system_prompt:
+                    st.warning("이름과 시스템 프롬프트는 필수입니다.")
+                else:
+                    # ⭐️ [신규] 이미지 업로드 로직 추가
+                    image_key_to_create = None
+                    if uploaded_file is not None:
+                        with st.spinner("이미지 업로드 중..."):
+                            file_bytes = uploaded_file.getvalue()
+                            presigned_data = api_client.get_presigned_url_for_upload(
+                                token=token,
+                                filename=uploaded_file.name,
+                                category="personas",
+                            )
+                            if presigned_data:
+                                upload_success = api_client.upload_file_to_s3(
+                                    presigned_url=presigned_data["url"],
+                                    file_data=file_bytes,
+                                    content_type=uploaded_file.type,
+                                )
+                                if upload_success:
+                                    image_key_to_create = presigned_data["object_key"]
+                                    st.toast("✅ 이미지가 성공적으로 업로드되었습니다.")
+                                else:
+                                    st.error(
+                                        "S3에 이미지를 업로드하는 데 실패했습니다. 페르소나 생성도 중단됩니다."
+                                    )
+                                    # 업로드 실패 시 더 이상 진행하지 않음
+                                    st.stop()
+                            else:
+                                st.error(
+                                    "이미지 업로드 URL을 받아오는 데 실패했습니다. 페르소나 생성도 중단됩니다."
+                                )
+                                st.stop()
+
+                    # ⭐️ [수정] 페르소나 생성 API 호출 시 image_key_to_create 전달
+                    with st.spinner("페르소나 생성 중..."):
+                        creation_success = api_client.create_persona(
+                            token=token,
+                            name=name,
+                            system_prompt=system_prompt,
+                            description=description,
+                            profile_image_key=image_key_to_create,  # ⭐️ 전달
+                        )
+
+                    if creation_success:
                         st.success(
                             "페르소나가 성공적으로 생성되었습니다! 목록을 새로고침합니다."
                         )
-                        # ⭐️ [개선 1] 생성 후 캐시 클리어 및 자동 새로고침
                         st.cache_data.clear()
                         time.sleep(1)
                         st.rerun()
                     else:
                         st.error("페르소나 생성에 실패했습니다.")
-                else:
-                    st.warning("이름과 시스템 프롬프트는 필수입니다.")
 
 
 def render_gemini_test_page(api_client, token):

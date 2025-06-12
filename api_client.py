@@ -14,6 +14,59 @@ class ApiClient:
     def __init__(self):
         self.base_url = os.getenv("FASTAPI_API_BASE_URL", "http://app:8000/api/v1")
 
+    # --- S3 파일 업로드 관련 API ---
+    def get_presigned_url_for_upload(
+        self, token: str, filename: str, category: str
+    ) -> Dict[str, Any] | None:
+        """
+        파일 업로드를 위한 Presigned URL을 백엔드로부터 받아옵니다.
+        """
+        headers = {"Authorization": f"Bearer {token}"}
+        url = f"{self.base_url}/storage/presigned-url/upload"
+        params = {"category": category}
+        payload = {"filename": filename}
+        try:
+            response = requests.post(
+                url, headers=headers, params=params, json=payload, timeout=10
+            )
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"Presigned URL 요청 실패: {e}")
+            return None
+
+    def upload_file_to_s3(
+        self, presigned_url: str, file_data: bytes, content_type: str
+    ) -> bool:
+        """
+        주어진 Presigned URL로 실제 파일 데이터를 PUT 요청으로 업로드합니다.
+        """
+        headers = {"Content-Type": content_type}
+        try:
+            response = requests.put(
+                presigned_url, data=file_data, headers=headers, timeout=60
+            )  # 업로드를 위해 타임아웃을 넉넉하게 설정
+            response.raise_for_status()
+            return True
+        except requests.exceptions.RequestException as e:
+            print(f"S3 파일 업로드 실패: {e}")
+            return False
+
+    def get_presigned_url_for_download(self, object_key: str) -> str | None:
+        """
+        파일 조회를 위한 Presigned URL을 백엔드로부터 받아옵니다.
+        이 API는 인증이 필요 없을 수 있으므로 token을 받지 않습니다.
+        """
+        url = f"{self.base_url}/storage/presigned-url/download"
+        params = {"object_key": object_key}
+        try:
+            response = requests.get(url, params=params, timeout=10)
+            response.raise_for_status()
+            return response.json().get("url")
+        except requests.exceptions.RequestException as e:
+            print(f"다운로드용 Presigned URL 요청 실패: {e}")
+            return None
+
     # --- 인증 API ---
     def login_for_token(self, email: str, password: str) -> str | None:
         login_data = {"username": email, "password": password}
@@ -79,7 +132,12 @@ class ApiClient:
             return None
 
     def create_persona(
-        self, token: str, name: str, system_prompt: str, description: str | None
+        self,
+        token: str,
+        name: str,
+        system_prompt: str,
+        description: str | None,
+        profile_image_key: str | None,
     ) -> Dict[str, Any] | None:
         headers = {"Authorization": f"Bearer {token}"}
         url = f"{self.base_url}/personas/"
@@ -88,6 +146,7 @@ class ApiClient:
             "system_prompt": system_prompt,
             "description": description,
             "is_public": True,
+            "profile_image_key": profile_image_key,
         }
         try:
             response = requests.post(url, headers=headers, json=payload, timeout=5)
@@ -109,6 +168,25 @@ class ApiClient:
             return True
         except requests.exceptions.RequestException as e:
             print(f"페르소나 삭제 실패: {e}")
+            return False
+
+        # ⭐️ [수정] update_persona 메서드에 profile_image_key를 포함하도록 수정
+
+    def update_persona(
+        self, token: str, persona_id: int, update_data: Dict[str, Any]
+    ) -> bool:
+        """
+        페르소나 정보를 업데이트합니다.
+        update_data 딕셔너리에 name, description, system_prompt, is_public, profile_image_key 등이 포함될 수 있습니다.
+        """
+        headers = {"Authorization": f"Bearer {token}"}
+        url = f"{self.base_url}/personas/{persona_id}"
+        try:
+            response = requests.put(url, headers=headers, json=update_data, timeout=10)
+            response.raise_for_status()
+            return True
+        except requests.exceptions.RequestException as e:
+            print(f"페르소나 업데이트 실패: {e}")
             return False
 
     # --- 대화방 관리 API ---
