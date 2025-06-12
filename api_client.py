@@ -97,6 +97,20 @@ class ApiClient:
             print(f"페르소나 생성 실패: {e}")
             return None
 
+    def delete_persona(self, token: str, persona_id: int) -> bool:
+        """[Admin] 페르소나를 삭제합니다."""
+        headers = {"Authorization": f"Bearer {token}"}
+        url = f"{self.base_url}/personas/{persona_id}"
+        try:
+            # DELETE 요청은 성공 시 보통 204 No Content를 반환하므로, 본문(json)이 없을 수 있습니다.
+            response = requests.delete(url, headers=headers, timeout=10)
+            response.raise_for_status()  # 2xx 상태 코드가 아니면 예외 발생
+            # 성공적으로 요청이 완료되면 True 반환
+            return True
+        except requests.exceptions.RequestException as e:
+            print(f"페르소나 삭제 실패: {e}")
+            return False
+
     # --- 대화방 관리 API ---
     def create_conversation(
         self, token: str, persona_id: int, title: str | None

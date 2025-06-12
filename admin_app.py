@@ -118,16 +118,16 @@ def render_conversation_test_page(api_client, token):
             "last_api_response",
             "sort_asc",
             "scroll_to_anchor",
+            "selected_conv_id",  # 👈 [버그 수정] 선택된 ID도 초기화
         ]
         for key in keys_to_clear:
             st.session_state.pop(key, None)
         st.cache_data.clear()
         st.rerun()
 
-    # 👇 [수정] 데이터가 비어있는지 먼저 확인
     if not all_conversations:
         st.info("조회된 대화방이 없습니다.")
-        return  # 데이터가 없으면 아래 코드를 실행하지 않고 함수 종료
+        return
 
     df = pd.json_normalize(all_conversations, sep="_")
     if search_query:
@@ -140,7 +140,6 @@ def render_conversation_test_page(api_client, token):
 
     st.write(f"총 {len(filtered_df)}개의 대화방이 조회되었습니다.")
 
-    # 👇 [수정] filtered_df가 비어있을 경우에 대한 처리 추가
     if filtered_df.empty:
         st.info("검색 결과에 해당하는 대화방이 없습니다.")
         return
@@ -166,12 +165,29 @@ def render_conversation_test_page(api_client, token):
         on_select="rerun",
         selection_mode="single-row",
     )
+
+    # 👇 [버그 수정] 사용자가 행을 선택하면 session_state에 ID를 저장
+    if selection.selection.rows:
+        selected_row_index = selection.selection.rows[0]
+        st.session_state.selected_conv_id = int(
+            filtered_df.iloc[selected_row_index]["id"]
+        )
+
     st.divider()
 
-    if selection.selection.rows:
-        # ... (이하 상세 보기 로직은 이전과 동일)
-        selected_row_index = selection.selection.rows[0]
-        selected_conv_id = int(filtered_df.iloc[selected_row_index]["id"])
+    # 👇 [버그 수정] 상세 보기 표시 조건을 session_state에 저장된 ID로 변경
+    if st.session_state.get("selected_conv_id"):
+        selected_conv_id = st.session_state.get("selected_conv_id")
+
+        # 선택된 행의 전체 데이터를 가져옵니다.
+        selected_conv_data_row = filtered_df[filtered_df["id"] == selected_conv_id]
+        if not selected_conv_data_row.empty:
+            selected_conv_data = selected_conv_data_row.iloc[0].to_dict()
+        else:
+            # 필터링 등으로 인해 목록에서 사라졌으면 선택 상태 초기화 후 재실행
+            del st.session_state.selected_conv_id
+            st.rerun()
+            return
 
         section_title(f"대화 상세 및 테스트 (ID: {selected_conv_id})")
 
@@ -242,6 +258,21 @@ def render_conversation_test_page(api_client, token):
 
         with detail_c2:
             st.subheader("⚡️ 액션")
+
+            # 👇 [기능 추가] 원본 시스템 프롬프트 표시
+            with st.expander("🤖 현재 페르소나의 원본 시스템 프롬프트"):
+                # all_conversations에서 현재 대화방의 페르소나 정보를 찾습니다.
+                persona_prompt = selected_conv_data.get(
+                    "persona_system_prompt", "프롬프트 정보를 불러올 수 없습니다."
+                )
+                st.text_area(
+                    label="Original System Prompt",
+                    value=persona_prompt,
+                    height=200,
+                    disabled=True,
+                    key=f"system_prompt_{selected_conv_id}",
+                )
+
             with st.expander("**AI 응답 테스트하기**", expanded=True):
                 with st.form(key=f"send_message_form_{selected_conv_id}"):
                     content = st.text_area(
@@ -292,6 +323,7 @@ def render_conversation_test_page(api_client, token):
                             "last_api_response",
                             "sort_asc",
                             "scroll_to_anchor",
+                            "selected_conv_id",  # 👈 [버그 수정] 선택 ID도 초기화
                         ]
                         for key in keys_to_clear:
                             st.session_state.pop(key, None)
@@ -485,15 +517,14 @@ def render_phishing_case_management_page(api_client, token):
     """피싱 사례 관리 페이지 UI를 렌더링합니다."""
     st.header("피싱 사례 관리")
 
+    # --- 데이터 로드 (변경 없음) ---
     @st.cache_data(ttl=300)
     def get_categories():
         return api_client.get_phishing_categories()
 
     categories = get_categories()
     if categories is None:
-        st.error(
-            "피싱 유형 목록을 불러오는 데 실패했습니다. 이 문제가 해결되어야 페이지를 사용할 수 있습니다."
-        )
+        st.error("피싱 유형 목록을 불러오는 데 실패했습니다.")
         return
 
     category_map = {cat["code"]: cat["description"] for cat in categories}
@@ -505,81 +536,41 @@ def render_phishing_case_management_page(api_client, token):
 
     cases = get_cases()
 
+    # --- 세션 상태 초기화 (변경 없음) ---
     if "editing_case_id" not in st.session_state:
         st.session_state.editing_case_id = None
+    if "confirming_delete_id" not in st.session_state:
+        st.session_state.confirming_delete_id = None
 
-    editing_case = None
-    if st.session_state.editing_case_id and cases is not None:
-        editing_case = next(
-            (case for case in cases if case["id"] == st.session_state.editing_case_id),
-            None,
-        )
+    # --- 1. 새 피싱 사례 생성 폼 (이제 '수정' 기능과 완전히 분리) ---
+    with st.expander("새 피싱 사례 생성하기", expanded=True):
+        with st.form(key="create_phishing_case_form", clear_on_submit=True):
+            st.subheader("새 피싱 사례 생성")
 
-    form_title = (
-        "새 피싱 사례 생성"
-        if editing_case is None
-        else f"피싱 사례 수정 (ID: {editing_case['id']})"
-    )
+            # 입력 필드
+            category_code = st.selectbox(
+                "피싱 유형*",
+                options=category_codes,
+                format_func=lambda code: f"{code} - {category_map[code]}",
+            )
+            title = st.text_input("제목*")
+            content = st.text_area("내용*", height=200)
+            case_date = st.date_input("사건 발생일")
+            reference_url = st.text_input("참고 URL")
 
-    with st.form(key="phishing_case_form", clear_on_submit=False):
-        st.subheader(form_title)
+            submitted = st.form_submit_button("새 사례 생성하기")
 
-        default_title = editing_case["title"] if editing_case else ""
-        default_content = editing_case["content"] if editing_case else ""
-        default_category_index = (
-            category_codes.index(editing_case["category_code"]) if editing_case else 0
-        )
-        default_date = (
-            pd.to_datetime(editing_case["case_date"]).date()
-            if editing_case and editing_case["case_date"]
-            else None
-        )
-        default_url = editing_case["reference_url"] if editing_case else ""
-
-        category_code = st.selectbox(
-            "피싱 유형*",
-            options=category_codes,
-            format_func=lambda code: f"{code} - {category_map[code]}",
-            index=default_category_index,
-        )
-        title = st.text_input("제목*", value=default_title)
-        content = st.text_area("내용*", value=default_content, height=200)
-        case_date = st.date_input("사건 발생일", value=default_date)
-        reference_url = st.text_input("참고 URL", value=default_url)
-
-        submitted = st.form_submit_button(
-            "저장하기" if editing_case is None else "수정 완료"
-        )
-
-        if submitted:
-            if not title or not content:
-                st.warning("제목과 내용은 필수 항목입니다.")
-            else:
-                case_data = {
-                    "category_code": category_code,
-                    "title": title,
-                    "content": content,
-                    "case_date": str(case_date) if case_date else None,
-                    "reference_url": str(reference_url) if reference_url else None,
-                }
-
-                if editing_case:
-                    result = api_client.update_phishing_case(
-                        token, editing_case["id"], case_data
-                    )
-                    if result and "id" in result:
-                        st.success("사례가 성공적으로 수정되었습니다.")
-                        st.session_state.editing_case_id = None
-                        st.cache_data.clear()
-                        st.rerun()
-                    else:
-                        error_detail = (
-                            result.get("detail", "알 수 없는 오류")
-                            if result
-                            else "API 요청 실패. 서버 연결을 확인해주세요."
-                        )
-                        st.error(f"수정 실패: {error_detail}")
+            if submitted:
+                if not title or not content:
+                    st.warning("제목과 내용은 필수 항목입니다.")
                 else:
+                    case_data = {
+                        "category_code": category_code,
+                        "title": title,
+                        "content": content,
+                        "case_date": str(case_date) if case_date else None,
+                        "reference_url": str(reference_url) if reference_url else None,
+                    }
                     result = api_client.create_phishing_case(token, case_data)
                     if result and "id" in result:
                         st.success("새 사례가 성공적으로 생성되었습니다.")
@@ -589,28 +580,20 @@ def render_phishing_case_management_page(api_client, token):
                         error_detail = (
                             result.get("detail", "알 수 없는 오류")
                             if result
-                            else "API 요청 실패. 서버 연결을 확인해주세요."
+                            else "API 요청 실패"
                         )
                         st.error(f"생성 실패: {error_detail}")
 
-    if st.session_state.editing_case_id:
-        if st.button("수정 취소"):
-            st.session_state.editing_case_id = None
-            st.rerun()
-
     st.divider()
 
-    # --- 3. 기존 사례 목록 표시 ---
+    # --- 2. 기존 사례 목록 표시 (UI/UX 개선 적용) ---
     st.subheader("기존 피싱 사례 목록")
 
     if cases is None:
-        st.error(
-            "피싱 사례 목록을 불러오는 데 실패했습니다. 네트워크 연결을 확인하거나 잠시 후 다시 시도해주세요."
-        )
+        st.error("피싱 사례 목록을 불러오는 데 실패했습니다.")
     elif not cases:
         st.info("등록된 피싱 사례가 없습니다.")
     else:
-        # 👇 [수정] Pandas DataFrame으로 변환하여 유형별로 그룹화
         df_cases = pd.DataFrame(cases)
         grouped = df_cases.groupby("category_code")
 
@@ -623,65 +606,245 @@ def render_phishing_case_management_page(api_client, token):
             with st.expander(expander_title):
                 for _, case in group.iterrows():
                     with st.container(border=True):
-                        c1, c2 = st.columns([4, 1])
-                        with c1:
-                            st.markdown(f"**ID: {case['id']}**")
-                            st.markdown(f"##### {case['title']}")
-                            st.caption(
-                                f"발생일: {case.get('case_date', 'N/A')} | 출처: {case.get('reference_url', 'N/A')}"
-                            )
-                        with c2:
+                        # --- 기본 정보 표시 ---
+                        st.markdown(
+                            f"**ID: {case['id']}** | 발생일: {case.get('case_date', 'N/A')}"
+                        )
+                        st.markdown(f"##### {case['title']}")
+
+                        st.text_area(
+                            "내용",
+                            value=case["content"],
+                            height=150,
+                            disabled=True,
+                            # key는 고유해야 하므로 그대로 유지합니다.
+                            key=f"content_text_{case['id']}",
+                        )
+
+                        st.caption(f"참고 URL: {case.get('reference_url', '없음')}")
+                        st.divider()
+
+                        # --- 액션 버튼 (수정/삭제) ---
+                        action_c1, action_c2 = st.columns(2)
+                        with action_c1:
                             if st.button(
                                 "수정",
                                 key=f"edit_{case['id']}",
                                 use_container_width=True,
                             ):
                                 st.session_state.editing_case_id = case["id"]
+                                st.session_state.confirming_delete_id = (
+                                    None  # 다른 액션 취소
+                                )
                                 st.rerun()
+                        with action_c2:
                             if st.button(
                                 "삭제",
                                 key=f"delete_{case['id']}",
                                 type="primary",
                                 use_container_width=True,
                             ):
-                                if api_client.delete_phishing_case(token, case["id"]):
-                                    st.success(
-                                        f"사례(ID: {case['id']})가 삭제되었습니다."
-                                    )
-                                    st.cache_data.clear()
-                                    st.session_state.editing_case_id = None
+                                st.session_state.confirming_delete_id = case["id"]
+                                st.session_state.editing_case_id = (
+                                    None  # 다른 액션 취소
+                                )
+                                st.rerun()
+
+                        # 👇 [개선 2-1] 인라인 수정 폼
+                        if st.session_state.get("editing_case_id") == case["id"]:
+                            with st.form(
+                                key=f"update_form_{case['id']}", clear_on_submit=False
+                            ):
+                                st.info(f"ID {case['id']} 사례 수정 중...")
+                                new_category_code = st.selectbox(
+                                    "피싱 유형*",
+                                    options=category_codes,
+                                    format_func=lambda code: f"{code} - {category_map[code]}",
+                                    index=category_codes.index(case["category_code"]),
+                                    key=f"cat_{case['id']}",
+                                )
+                                new_title = st.text_input(
+                                    "제목*",
+                                    value=case["title"],
+                                    key=f"title_{case['id']}",
+                                )
+                                new_content = st.text_area(
+                                    "내용*",
+                                    value=case["content"],
+                                    height=150,
+                                    key=f"cont_{case['id']}",
+                                )
+
+                                form_c1, form_c2 = st.columns(2)
+                                with form_c1:
+                                    if st.form_submit_button(
+                                        "수정 완료",
+                                        use_container_width=True,
+                                        type="primary",
+                                    ):
+                                        update_data = {
+                                            "category_code": new_category_code,
+                                            "title": new_title,
+                                            "content": new_content,
+                                        }
+                                        result = api_client.update_phishing_case(
+                                            token, case["id"], update_data
+                                        )
+                                        if result and "id" in result:
+                                            st.success("수정 완료!")
+                                            st.session_state.editing_case_id = None
+                                            st.cache_data.clear()
+                                            st.rerun()
+                                        else:
+                                            st.error("수정 실패")
+                                with form_c2:
+                                    if st.form_submit_button(
+                                        "취소", use_container_width=True
+                                    ):
+                                        st.session_state.editing_case_id = None
+                                        st.rerun()
+
+                        # 👇 [개선 2-2] 삭제 확인 UI
+                        if st.session_state.get("confirming_delete_id") == case["id"]:
+                            st.warning(
+                                f"**정말로 ID {case['id']} 사례를 삭제하시겠습니까?** 이 작업은 되돌릴 수 없습니다."
+                            )
+                            del_c1, del_c2 = st.columns(2)
+                            with del_c1:
+                                if st.button(
+                                    "예, 삭제합니다",
+                                    key=f"confirm_del_{case['id']}",
+                                    type="primary",
+                                    use_container_width=True,
+                                ):
+                                    if api_client.delete_phishing_case(
+                                        token, case["id"]
+                                    ):
+                                        st.success(
+                                            f"사례(ID: {case['id']})가 삭제되었습니다."
+                                        )
+                                        st.session_state.confirming_delete_id = None
+                                        st.cache_data.clear()
+                                        st.rerun()
+                                    else:
+                                        st.error("삭제 실패")
+                            with del_c2:
+                                if st.button(
+                                    "아니요, 취소합니다",
+                                    key=f"cancel_del_{case['id']}",
+                                    use_container_width=True,
+                                ):
+                                    st.session_state.confirming_delete_id = None
                                     st.rerun()
-                                else:
-                                    st.error("삭제에 실패했습니다.")
 
 
 def render_persona_management_page(api_client, token):
-    """페르소나 관리 페이지 UI를 렌더링합니다."""
+    """페르소나 관리 페이지 UI를 렌더링합니다. (개선된 UI/UX 적용)"""
     st.header("페르소나 관리")
+
+    @st.cache_data(ttl=60)
+    def get_personas_data():
+        return api_client.get_personas(token)
+
+    # ⭐️ [개선 3] 수정/삭제 상태를 세션에서 관리
+    if "editing_persona_id" not in st.session_state:
+        st.session_state.editing_persona_id = None
+
+    # --- 1. 수정/삭제 뷰 렌더링 ---
+    if st.session_state.editing_persona_id:
+        all_personas = get_personas_data()
+        persona_to_edit = next(
+            (p for p in all_personas if p["id"] == st.session_state.editing_persona_id),
+            None,
+        )
+
+        if persona_to_edit is None:
+            st.error("수정할 페르소나를 찾을 수 없습니다. 목록으로 돌아갑니다.")
+            st.session_state.editing_persona_id = None
+            st.rerun()
+            return
+
+        section_title(f"페르소나 관리 (ID: {persona_to_edit['id']})")
+
+        # 수정 폼
+        with st.form(key=f"update_form_persona_{persona_to_edit['id']}"):
+            st.subheader("페르소나 정보 수정")
+            name = st.text_input("이름", value=persona_to_edit["name"])
+            desc = st.text_input("설명", value=persona_to_edit.get("description", ""))
+            prompt = st.text_area(
+                "시스템 프롬프트", value=persona_to_edit["system_prompt"], height=200
+            )
+            is_public = st.checkbox("공개", value=persona_to_edit["is_public"])
+
+            c1, c2 = st.columns(2)
+            if c1.form_submit_button(
+                "저장하기", use_container_width=True, type="primary"
+            ):
+                update_data = {
+                    "name": name,
+                    "description": desc,
+                    "system_prompt": prompt,
+                    "is_public": is_public,
+                }
+                if api_client.update_persona(token, persona_to_edit["id"], update_data):
+                    st.success("페르소나 정보가 성공적으로 업데이트되었습니다.")
+                    st.cache_data.clear()
+                    st.session_state.editing_persona_id = None
+                    time.sleep(1)
+                    st.rerun()
+                else:
+                    st.error("업데이트에 실패했습니다.")
+            if c2.form_submit_button("취소", use_container_width=True):
+                st.session_state.editing_persona_id = None
+                st.rerun()
+
+        # 삭제 섹션
+        with st.expander("페르소나 삭제하기", expanded=False):
+            st.error(
+                "주의: 이 작업은 되돌릴 수 없으며, 관련된 대화방도 영향을 받을 수 있습니다."
+            )
+            if st.button(
+                f"ID {persona_to_edit['id']} ({persona_to_edit['name']}) 영구 삭제",
+                type="primary",
+                use_container_width=True,
+            ):
+                if api_client.delete_persona(token, persona_to_edit["id"]):
+                    st.success("페르소나가 성공적으로 삭제되었습니다.")
+                    st.cache_data.clear()
+                    st.session_state.editing_persona_id = None
+                    time.sleep(1)
+                    st.rerun()
+                else:
+                    st.error("삭제에 실패했습니다.")
+        return  # 수정 뷰를 렌더링했으면 여기서 함수 실행 종료
+
+    # --- 2. 목록 및 생성 뷰 렌더링 ---
     tab1, tab2 = st.tabs(["페르소나 목록", "새 페르소나 생성"])
 
     # '페르소나 목록' 탭
     with tab1:
-        if st.button("페르소나 목록 새로고침"):
+        if st.button("페르소나 목록 새로고침", use_container_width=True):
             st.cache_data.clear()
             st.rerun()
 
-        @st.cache_data(ttl=60)
-        def get_personas_data():
-            return api_client.get_personas(token)
-
         personas = get_personas_data()
+
         if personas is None:
-            st.error("페르소나 목록을 가져오는 데 실패했습니다.")
-            return
+            st.error(
+                "페르소나 목록을 가져오는 데 실패했습니다. API 서버 연결 상태를 확인해주세요."
+            )
+            return  # 함수를 즉시 종료하여 아래 코드 실행을 방지
 
         st.write(f"총 {len(personas)}개의 페르소나가 조회되었습니다.")
+        st.divider()
+
         for p in personas:
             with st.container(border=True):
                 c1, c2 = st.columns([4, 1])
                 with c1:
                     st.subheader(f"ID {p['id']}: {p['name']}")
-                    st.caption(f"Public: {p['is_public']}")
+                    # ⭐️ [개선 2] 설명 필드 추가
+                    st.caption(f"설명: {p.get('description') or '없음'}")
                     st.text_area(
                         "System Prompt",
                         value=p["system_prompt"],
@@ -690,82 +853,40 @@ def render_persona_management_page(api_client, token):
                         key=f"prompt_{p['id']}",
                     )
                 with c2:
-                    if st.button("수정", key=f"edit_persona_{p['id']}"):
-                        st.session_state["edit_persona_id"] = p["id"]
+                    # ⭐️ [개선 3] '관리하기' 버튼으로 통합
                     if st.button(
-                        "삭제", key=f"delete_persona_{p['id']}", type="primary"
+                        "관리하기",
+                        key=f"manage_persona_{p['id']}",
+                        use_container_width=True,
                     ):
-                        st.session_state["delete_persona_id"] = p["id"]
-
-                # 페르소나 수정 폼
-                if st.session_state.get("edit_persona_id") == p["id"]:
-                    with st.expander(f"**ID {p['id']} 페르소나 수정**", expanded=True):
-                        with st.form(key=f"update_form_persona_{p['id']}"):
-                            name = st.text_input("이름", value=p["name"])
-                            desc = st.text_input("설명", value=p.get("description", ""))
-                            prompt = st.text_area(
-                                "시스템 프롬프트", value=p["system_prompt"], height=150
-                            )
-                            is_public = st.checkbox("공개", value=p["is_public"])
-                            if st.form_submit_button("저장"):
-                                update_data = {
-                                    "name": name,
-                                    "description": desc,
-                                    "system_prompt": prompt,
-                                    "is_public": is_public,
-                                }
-                                if api_client.update_persona(
-                                    token, p["id"], update_data
-                                ):
-                                    st.success("업데이트 성공!")
-                                    st.cache_data.clear()
-                                    del st.session_state["edit_persona_id"]
-                                    st.rerun()
-                                else:
-                                    st.error("업데이트 실패.")
-
-                # 페르소나 삭제 확인
-                if st.session_state.get("delete_persona_id") == p["id"]:
-                    st.warning(
-                        f"**정말로 페르소나 ID {p['id']} ({p['name']})을(를) 삭제하시겠습니까?**"
-                    )
-                    c1, c2 = st.columns(2)
-                    if c1.button(
-                        "예, 삭제합니다",
-                        key=f"confirm_delete_p_{p['id']}",
-                        type="primary",
-                    ):
-                        if api_client.delete_persona(token, p["id"]):
-                            st.success("삭제 성공!")
-                            st.cache_data.clear()
-                            del st.session_state["delete_persona_id"]
-                            st.rerun()
-                        else:
-                            st.error("삭제 실패.")
-                    if c2.button("아니요", key=f"cancel_delete_p_{p['id']}"):
-                        del st.session_state["delete_persona_id"]
+                        st.session_state.editing_persona_id = p["id"]
                         st.rerun()
 
     # '새 페르소나 생성' 탭
     with tab2:
         section_title("새 페르소나 생성")
         with st.form("create_persona_form"):
-            name = st.text_input("이름*", placeholder="예: 고양이 집사 츄르")
+            name = st.text_input("이름*", placeholder="예: 금융감독원 김민준 주임")
+            description = st.text_input(
+                "설명", placeholder="예: 불법 사금융 및 보이스피싱 피해 예방 전문가"
+            )
             system_prompt = st.text_area(
                 "시스템 프롬프트*",
                 height=150,
-                placeholder="예: 너는 고양이를 매우 사랑하는 고양이 집사야...",
+                placeholder="예: 너는 금융감독원의 '김민준 주임'이야...",
             )
-            description = st.text_input(
-                "설명", placeholder="예: 세상의 모든 고양이를 사랑하는 츄르"
-            )
-            if st.form_submit_button("페르소나 생성"):
+            if st.form_submit_button("페르소나 생성", use_container_width=True):
                 if name and system_prompt:
                     if api_client.create_persona(
                         token, name, system_prompt, description
                     ):
-                        st.success("페르소나가 성공적으로 생성되었습니다!")
+                        st.success(
+                            "페르소나가 성공적으로 생성되었습니다! 목록을 새로고침합니다."
+                        )
+                        # ⭐️ [개선 1] 생성 후 캐시 클리어 및 자동 새로고침
                         st.cache_data.clear()
+                        time.sleep(1)
+                        st.rerun()
                     else:
                         st.error("페르소나 생성에 실패했습니다.")
                 else:
@@ -822,7 +943,7 @@ def render_login_page(api_client):
     """
     st.subheader("관리자 로그인")
 
-    is_dev_mode = os.getenv("APP_ENV") == "dev"
+    is_dev_mode = os.getenv("APP_ENV", "dev") == "dev"
     if is_dev_mode:
         st.info("ℹ️ 개발 모드: 로그인 정보가 자동으로 채워졌습니다.")
 
@@ -876,7 +997,11 @@ def render_initial_setup_page(api_client):
                         f"관리자 계정 '{result['email']}'이(가) 성공적으로 생성되었습니다."
                     )
                     st.info("이제 로그인 페이지로 이동합니다.")
-                    time.sleep(3)
+
+                    # 캐시를 강제로 지워 즉시 상태 변경을 반영합니다.
+                    st.cache_data.clear()
+
+                    time.sleep(1)
                     st.rerun()
                 else:
                     st.error(
@@ -931,7 +1056,7 @@ def main():
         superuser_exists = get_superuser_existence()
 
         if not superuser_exists:
-            is_signup_mode_enabled = os.getenv("SECRET_SIGNUP_MODE") == "true"
+            is_signup_mode_enabled = os.getenv("SECRET_SIGNUP_MODE", "true") == "true"
             if is_signup_mode_enabled:
                 render_initial_setup_page(api_client)
             else:
