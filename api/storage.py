@@ -76,12 +76,13 @@ class StorageMixin:
             logger.error(f"🔥 S3 객체 삭제 요청 실패: Key={object_key}, Error={e}")
             return False
 
-    def get_presigned_url_for_download(self, object_key: str) -> str | None:
-        """파일 조회를 위한 Presigned URL을 백엔드로부터 받아옵니다."""
+    def get_presigned_url_for_download(self, token: str, object_key: str) -> str | None:
+        """파일 조회를 위한 Presigned URL을 백엔드로부터 받아옵니다. (인증 필요)"""
+        headers = {"Authorization": f"Bearer {token}"}
         url = f"{self.base_url}/storage/presigned-url/download"
         params = {"object_key": object_key}
         try:
-            response = requests.get(url, params=params, timeout=10)
+            response = requests.get(url, headers=headers, params=params, timeout=10)
             response.raise_for_status()
             return response.json().get("url")
         except requests.exceptions.RequestException as e:

@@ -83,7 +83,7 @@ def render_persona_management_page(api_client: ApiClient, token: str):
             if current_image_key:
                 with st.spinner("이미지 로딩 중..."):
                     download_url = api_client.get_presigned_url_for_download(
-                        current_image_key
+                        token,current_image_key
                     )
                 if download_url:
                     st.image(
