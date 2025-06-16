@@ -18,6 +18,17 @@ class AuthMixin:
             print(f"API 로그인 요청 실패: {e}")
             return None
 
+    def get_server_version(self) -> Dict[str, Any] | None:
+        """백엔드 서버의 버전 정보를 조회합니다."""
+        url = f"{self.base_url.replace('/api/v1', '')}/version"
+        try:
+            response = requests.get(url, timeout=3)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"서버 버전 조회 실패: {e}")
+            return None
+        
     def check_superuser_exists(self) -> bool:
         """
         슈퍼유저 존재 여부를 확인합니다.

@@ -46,6 +46,19 @@ def render_main_app(api_client: ApiClient, token: str):
             del st.session_state[key]
         st.rerun()
 
+    # --- ✅ 버전 정보 표시 로직 추가 ---
+    st.sidebar.divider()
+
+    @st.cache_data(ttl=300) # 5분 동안 캐시
+    def get_cached_server_version():
+        return api_client.get_server_version()
+
+    version_info = get_cached_server_version()
+    if version_info:
+        st.sidebar.caption(f"Backend: `{version_info.get('version', 'N/A')}`")
+    else:
+        st.sidebar.caption("`서버 버전 확인 불가`")
+
     # 선택된 페이지 렌더링 함수를 호출합니다.
     page_options[selected_page](api_client, token)
 
