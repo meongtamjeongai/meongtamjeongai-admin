@@ -25,10 +25,10 @@ class AuthMixin:
             response.raise_for_status()
             if isinstance(response.json(), bool):
                 return response.json()
-            return True
+            return False
         except requests.exceptions.RequestException as e:
             print(f"슈퍼유저 존재 여부 확인 실패: {e}")
-            return True
+            return False
 
     def create_initial_superuser(
         self, email: str, password: str
