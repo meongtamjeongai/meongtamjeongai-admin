@@ -214,22 +214,36 @@ def render_conversation_test_page(api_client: ApiClient, token: str):
                     with st.chat_message(name=sender_type, avatar=avatar):
                         st.markdown(msg.get("content"))
 
-                        # ✅ AI 메시지이고, 적용된 피싱 사례가 있는 경우에만 표시
-                        applied_case = msg.get("applied_phishing_case")
-                        if sender_type == 'ai' and applied_case:
-                            with st.expander("🤖 이 응답에 적용된 AI 시나리오", expanded=False):
-                                st.info(f"**유형**: {applied_case.get('category_code', 'N/A')}")
-                                st.info(f"**제목**: {applied_case.get('title', 'N/A')}")
-                                st.text_area(
-                                    "**내용**",
-                                    value=applied_case.get('content', 'N/A'),
-                                    height=150,
-                                    disabled=True,
-                                    key=f"phishing_case_{msg['id']}"
-                                )
-                        
                         with st.expander("메시지 상세 정보"):
-                            filtered_msg_details = {k: v for k, v in msg.items() if k not in ["content", "applied_phishing_case"]}
+                            is_last_ai_message = (
+                                sender_type == "ai"
+                                and "last_api_response" in st.session_state
+                                and st.session_state.last_api_response["ai_message"][
+                                    "id"
+                                ]
+                                == msg["id"]
+                            )
+
+                            if (
+                                is_last_ai_message
+                                and "debug_request_contents"
+                                in st.session_state.last_api_response
+                            ):
+                                with st.expander("🪙 토큰 계산에 사용된 Contents 보기"):
+                                    st.info(
+                                        "아래 내용은 `gemini_token_usage` 계산의 기반이 된 실제 데이터입니다."
+                                    )
+                                    st.json(
+                                        st.session_state.last_api_response[
+                                            "debug_request_contents"
+                                        ]
+                                    )
+
+                            filtered_msg_details = {
+                                k: v
+                                for k, v in msg.items()
+                                if k not in ["content", "applied_phishing_case"]
+                            }
                             st.json(filtered_msg_details)
 
             st.markdown("<div id='chat_anchor'></div>", unsafe_allow_html=True)
@@ -249,6 +263,22 @@ def render_conversation_test_page(api_client: ApiClient, token: str):
                     disabled=True,
                     key=f"system_prompt_{selected_conv_id}",
                 )
+
+            if (
+                "last_api_response" in st.session_state
+                and st.session_state.last_api_response.get("final_system_prompt")
+            ):
+                with st.expander("🚀 AI에 적용된 최종 시스템 프롬프트", expanded=True):
+                    final_prompt = st.session_state.last_api_response.get(
+                        "final_system_prompt"
+                    )
+                    st.text_area(
+                        label="Final System Prompt Applied to AI",
+                        value=final_prompt,
+                        height=250,
+                        disabled=True,
+                        key=f"final_prompt_{selected_conv_id}",
+                    )
 
             with st.expander("**AI 응답 테스트하기**", expanded=True):
                 with st.form(key=f"send_message_form_{selected_conv_id}"):
