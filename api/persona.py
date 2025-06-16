@@ -25,6 +25,8 @@ class PersonaMixin:
         system_prompt: str,
         description: str | None,
         profile_image_key: str | None,
+        starting_message: str | None,
+        conversation_starters: List[str] | None,        
     ) -> Dict[str, Any] | None:
         headers = {"Authorization": f"Bearer {token}"}
         url = f"{self.base_url}/personas/"
@@ -34,6 +36,8 @@ class PersonaMixin:
             "description": description,
             "is_public": True,
             "profile_image_key": profile_image_key,
+            "starting_message": starting_message,
+            "conversation_starters": conversation_starters,
         }
         try:
             response = requests.post(url, headers=headers, json=payload, timeout=5)
