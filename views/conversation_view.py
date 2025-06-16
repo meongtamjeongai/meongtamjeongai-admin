@@ -213,8 +213,24 @@ def render_conversation_test_page(api_client: ApiClient, token: str):
                     )
                     with st.chat_message(name=sender_type, avatar=avatar):
                         st.markdown(msg.get("content"))
+
+                        # ✅ AI 메시지이고, 적용된 피싱 사례가 있는 경우에만 표시
+                        applied_case = msg.get("applied_phishing_case")
+                        if sender_type == 'ai' and applied_case:
+                            with st.expander("🤖 이 응답에 적용된 AI 시나리오", expanded=False):
+                                st.info(f"**유형**: {applied_case.get('category_code', 'N/A')}")
+                                st.info(f"**제목**: {applied_case.get('title', 'N/A')}")
+                                st.text_area(
+                                    "**내용**",
+                                    value=applied_case.get('content', 'N/A'),
+                                    height=150,
+                                    disabled=True,
+                                    key=f"phishing_case_{msg['id']}"
+                                )
+                        
                         with st.expander("메시지 상세 정보"):
-                            st.json({k: v for k, v in msg.items() if k != "content"})
+                            filtered_msg_details = {k: v for k, v in msg.items() if k not in ["content", "applied_phishing_case"]}
+                            st.json(filtered_msg_details)
 
             st.markdown("<div id='chat_anchor'></div>", unsafe_allow_html=True)
             st.divider()
