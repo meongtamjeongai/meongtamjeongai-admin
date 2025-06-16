@@ -265,10 +265,12 @@ def render_persona_management_page(api_client: ApiClient, token: str):
                     if image_key:
 
                         @st.cache_data(ttl=3600)
-                        def get_cached_download_url(key):
-                            return api_client.get_presigned_url_for_download(key)
+                        def get_cached_download_url(key, auth_token): # 1. auth_token 인자 추가
+                            # 2. token과 object_key를 명시적으로 전달
+                            return api_client.get_presigned_url_for_download(token=auth_token, object_key=key)
 
-                        img_url = get_cached_download_url(image_key)
+                        # 3. 함수 호출 시 token 전달
+                        img_url = get_cached_download_url(image_key, token)
                         if img_url:
                             st.image(img_url, width=150)
                         else:
