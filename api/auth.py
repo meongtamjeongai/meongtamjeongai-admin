@@ -19,16 +19,25 @@ class AuthMixin:
             return None
 
     def check_superuser_exists(self) -> bool:
+        """
+        슈퍼유저 존재 여부를 확인합니다.
+        성공 시 bool 값을 반환하고, API 통신 실패 시 RequestException을 발생시킵니다.
+        """
         url = f"{self.base_url}/admin/superuser-exists"
         try:
             response = requests.get(url, timeout=5)
+            # HTTP 상태 코드가 2xx가 아니면 예외 발생
             response.raise_for_status()
-            if isinstance(response.json(), bool):
-                return response.json()
-            return False
+            
+            data = response.json()
+            if not isinstance(data, bool):
+                # API가 예상치 못한 형식의 응답을 준 경우도 에러로 처리
+                raise ValueError(f"API로부터 boolean이 아닌 응답을 받았습니다: {data}")
+            return data
         except requests.exceptions.RequestException as e:
-            print(f"슈퍼유저 존재 여부 확인 실패: {e}")
-            return False
+            # ✅ 수정: 예외를 잡은 후, 로그만 남기고 다시 발생시켜 호출자에게 알림
+            print(f"API 통신 실패 (check_superuser_exists): {e}")
+            raise e
 
     def create_initial_superuser(
         self, email: str, password: str
