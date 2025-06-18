@@ -174,7 +174,7 @@ def render_user_management_page(api_client: ApiClient, token: str):
                             with st.spinner("이미지 로딩 중..."):
                                 download_url = (
                                     api_client.get_presigned_url_for_download(
-                                        current_image_key
+                                        token=token, object_key=current_image_key
                                     )
                                 )
                             if download_url:
