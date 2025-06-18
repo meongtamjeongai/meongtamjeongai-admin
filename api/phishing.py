@@ -1,4 +1,5 @@
 # api/phishing.py
+import json
 from typing import Any, Dict, List
 
 import requests
@@ -77,4 +78,26 @@ class PhishingMixin:
             return response.json()
         except requests.exceptions.RequestException as e:
             print(f"피싱 사례 상세 조회 실패 (ID: {case_id}): {e}")
+            return None
+
+    def analyze_image_for_phishing(
+        self, token: str, image_base64: str
+    ) -> Dict[str, Any] | None:
+        """Base64로 인코딩된 이미지를 전송하여 피싱 위험도 분석을 요청합니다."""
+        headers = {"Authorization": f"Bearer {token}"}
+        url = f"{self.base_url}/phishing/analyze-image"
+        payload = {"image_base64": image_base64}
+        try:
+            # 이미지 분석은 시간이 걸릴 수 있으므로 timeout을 넉넉하게 설정
+            response = requests.post(url, headers=headers, json=payload, timeout=90)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"이미지 분석 API 요청 실패: {e}")
+            # 서버에서 보낸 에러 메시지가 있다면 반환
+            if e.response is not None:
+                try:
+                    return e.response.json()
+                except json.JSONDecodeError:
+                    return {"detail": e.response.text}
             return None

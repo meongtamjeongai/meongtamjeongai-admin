@@ -1,15 +1,17 @@
 # admin_app.py
 import os
 
-import streamlit as st
 import requests
+import streamlit as st
 
 from api import ApiClient
 from views.auth_view import render_initial_setup_page, render_login_page
 from views.conversation_view import render_conversation_test_page
+from views.image_analysis_view import render_image_analysis_page
 from views.persona_view import render_persona_management_page
 from views.phishing_view import render_phishing_case_management_page
 from views.user_view import render_user_management_page
+
 
 def render_server_error_page(error: Exception):
     """서버 연결 실패 시 보여줄 공통 에러 페이지"""
@@ -26,6 +28,7 @@ def render_server_error_page(error: Exception):
     with st.expander("자세한 오류 정보 보기"):
         st.exception(error)
 
+
 def render_main_app(api_client: ApiClient, token: str):
     """로그인 성공 후 보여질 메인 애플리케이션 UI를 렌더링합니다."""
     st.sidebar.title("🐶 멍탐정 관리 메뉴")
@@ -36,6 +39,7 @@ def render_main_app(api_client: ApiClient, token: str):
         "페르소나 관리": render_persona_management_page,
         "대화방 관리 및 테스트": render_conversation_test_page,
         "피싱 사례 관리": render_phishing_case_management_page,
+        "이미지 분석 테스트": render_image_analysis_page,
     }
 
     selected_page = st.sidebar.radio("페이지 선택:", list(page_options.keys()))
@@ -49,7 +53,7 @@ def render_main_app(api_client: ApiClient, token: str):
     # --- ✅ 버전 정보 표시 로직 추가 ---
     st.sidebar.divider()
 
-    @st.cache_data(ttl=300) # 5분 동안 캐시
+    @st.cache_data(ttl=300)  # 5분 동안 캐시
     def get_cached_server_version():
         return api_client.get_server_version()
 
@@ -88,7 +92,9 @@ def main():
 
             # --- 아래는 예외가 발생하지 않았을 때만 실행됩니다. ---
             if not superuser_exists:
-                is_signup_mode_enabled = os.getenv("SECRET_SIGNUP_MODE", "true") == "true"
+                is_signup_mode_enabled = (
+                    os.getenv("SECRET_SIGNUP_MODE", "true") == "true"
+                )
                 if is_signup_mode_enabled:
                     render_initial_setup_page(api_client)
                 else:
@@ -100,13 +106,14 @@ def main():
                     )
             else:
                 render_login_page(api_client)
-        
+
         except requests.exceptions.RequestException as e:
             # ✅ API 통신 예외 발생 시, 공통 에러 페이지를 렌더링합니다.
             render_server_error_page(e)
         except Exception as e:
             # ✅ 그 외 예상치 못한 다른 오류 발생 시에도 에러 페이지를 보여줍니다.
             render_server_error_page(e)
+
 
 if __name__ == "__main__":
     main()
