@@ -81,13 +81,23 @@ class ConversationMixin:
             return False
 
     def send_message(
-        self, token: str, conversation_id: int, content: str
+        self,
+        token: str,
+        conversation_id: int,
+        content: str,
+        image_base64: str | None = None,
     ) -> Dict[str, Any] | None:
         headers = {"Authorization": f"Bearer {token}"}
         url = f"{self.base_url}/conversations/{conversation_id}/messages/"
+        
+        # --- 페이로드 구성 로직 ---
         payload = {"content": content}
+        if image_base64:
+            payload["image_base64"] = image_base64
+            
         try:
-            response = requests.post(url, headers=headers, json=payload, timeout=30)
+            # 이미지 데이터는 클 수 있으므로 timeout을 60초로 늘립니다.
+            response = requests.post(url, headers=headers, json=payload, timeout=60)
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:

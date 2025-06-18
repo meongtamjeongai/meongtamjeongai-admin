@@ -1,5 +1,6 @@
 # views/conversation_view.py
 import time
+import base64
 
 import pandas as pd
 import streamlit as st
@@ -279,10 +280,36 @@ def render_conversation_test_page(api_client: ApiClient, token: str):
                         else "⚙️"
                     )
                     with st.chat_message(name=sender_type, avatar=avatar):
-                        st.markdown(msg.get("content"))
+                        # --- ✅ [수정] 이미지 키가 있는지 확인하고 이미지 표시 ---
+                        image_key = msg.get("image_key")
+                        if image_key:
+                            # Presigned URL은 만료될 수 있으므로 매번 새로 가져오되,
+                            # Streamlit의 캐시를 활용하여 동일 키에 대한 중복 호출을 방지합니다.
+                            @st.cache_data(ttl=600) # 10분간 URL 캐시
+                            def get_cached_image_url(key):
+                                return api_client.get_presigned_url_for_download(
+                                    token=token, object_key=key
+                                )
+                            
+                            with st.spinner("이미지 로딩 중..."):
+                                image_url = get_cached_image_url(image_key)
+
+                            if image_url:
+                                # 이미지 너비를 제한하여 채팅 UI가 깨지지 않도록 합니다.
+                                st.image(image_url, width=300)
+                            else:
+                                st.error("이미지를 불러올 수 없습니다.")
+
+                        # 텍스트 내용이 있을 경우에만 표시
+                        if msg.get("content"):
+                            st.markdown(msg.get("content"))
+                            
                         with st.expander("메시지 상세 정보"):
+                            # content와 image_key를 제외한 나머지 정보 표시
                             filtered_msg_details = {
-                                k: v for k, v in msg.items() if k != "content"
+                                k: v
+                                for k, v in msg.items()
+                                if k not in ["content", "image_key"]
                             }
                             st.json(filtered_msg_details)
 
@@ -348,6 +375,15 @@ def render_conversation_test_page(api_client: ApiClient, token: str):
                     st.info("현재 적용된 피싱 시나리오가 없습니다.")
 
             with st.expander("**AI 응답 테스트하기**", expanded=True):
+                # --- ✅ [수정] 파일 업로더와 폼 로직 ---
+                uploaded_file = st.file_uploader(
+                    "이미지 첨부 (선택)", type=["png", "jpg", "jpeg", "webp"]
+                )
+
+                if uploaded_file is not None:
+                    # 업로드된 이미지 미리보기
+                    st.image(uploaded_file, caption="첨부할 이미지 미리보기", width=200)
+
                 with st.form(key=f"send_message_form_{selected_conv_id}"):
                     content = st.text_area(
                         "보낼 메시지 내용*",
@@ -358,10 +394,21 @@ def render_conversation_test_page(api_client: ApiClient, token: str):
                     )
 
                 if submitted:
-                    if content:
+                    # 텍스트 또는 이미지가 하나라도 있어야 전송 가능
+                    if content or uploaded_file:
+                        image_b64_string = None
+                        if uploaded_file is not None:
+                            # 파일을 읽어 Base64로 인코딩
+                            image_b64_string = base64.b64encode(
+                                uploaded_file.getvalue()
+                            ).decode("utf-8")
+
                         with st.spinner("AI가 답변을 생성하는 중..."):
                             response_data = api_client.send_message(
-                                token, selected_conv_id, content
+                                token=token,
+                                conversation_id=selected_conv_id,
+                                content=content,
+                                image_base64=image_b64_string,
                             )
                         if response_data:
                             st.session_state.last_api_response = response_data
@@ -376,7 +423,7 @@ def render_conversation_test_page(api_client: ApiClient, token: str):
                         else:
                             st.error("메시지 전송 또는 AI 응답 수신에 실패했습니다.")
                     else:
-                        st.warning("메시지 내용은 필수입니다.")
+                        st.warning("메시지 내용 또는 이미지를 첨부해야 합니다.")
 
                 st.markdown("##### 빠른 선택지")
                 options_to_show = []
