@@ -170,6 +170,21 @@ def render_conversation_test_page(api_client: ApiClient, token: str):
         }
     )
 
+    # '마지막 대화' 열의 문자열을 datetime 객체로 변환합니다.
+    # 변환 실패 시 (예: 값이 None인 경우) NaT(Not a Time)으로 처리됩니다.
+    dt_series = pd.to_datetime(display_df["마지막 대화"], errors="coerce")
+
+    # 1. 원본 시간이 UTC 기준임을 명시하고,
+    # 2. 'Asia/Seoul' (KST) 타임존으로 변환한 후,
+    # 3. 'YYYY-MM-DD HH:MM:SS' 형식의 문자열로 만듭니다.
+    # 4. 변환에 실패했던 NaT 값은 'N/A'로 채웁니다.
+    display_df["마지막 대화"] = (
+        dt_series.dt.tz_localize("UTC")
+        .dt.tz_convert("Asia/Seoul")
+        .dt.strftime("%Y-%m-%d %H:%M:%S")
+        .fillna("N/A")
+    )
+
     selection = st.dataframe(
         display_df,
         use_container_width=True,
