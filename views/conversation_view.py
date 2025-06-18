@@ -162,6 +162,7 @@ def render_conversation_test_page(api_client: ApiClient, token: str):
     display_df = pd.DataFrame(
         {
             "ID": filtered_df["id"],
+            "사용자 ID": filtered_df["user"].apply(lambda u: u.get("id", "N/A")),
             "사용자 이메일": filtered_df["user"].apply(lambda u: u.get("email", "N/A")),
             "페르소나": filtered_df["persona"].apply(lambda p: p.get("name", "N/A")),
             "대화방 제목": filtered_df["title"],
