@@ -165,6 +165,9 @@ def render_conversation_test_page(api_client: ApiClient, token: str):
             "사용자 ID": filtered_df["user"].apply(lambda u: u.get("id", "N/A")),
             "사용자 이메일": filtered_df["user"].apply(lambda u: u.get("email", "N/A")),
             "페르소나": filtered_df["persona"].apply(lambda p: p.get("name", "N/A")),
+            "시나리오 ID": filtered_df["applied_phishing_case_id"]
+            .fillna(0)
+            .astype(int),
             "대화방 제목": filtered_df["title"],
             "마지막 대화": filtered_df["last_message_at"],
         }
@@ -306,6 +309,43 @@ def render_conversation_test_page(api_client: ApiClient, token: str):
                     disabled=True,
                     key=f"system_prompt_{selected_conv_id}",
                 )
+
+            with st.expander("🎣 현재 적용된 피싱 시나리오", expanded=True):
+                # 대화방 데이터에서 피싱 사례 ID를 가져옵니다.
+                case_id = selected_conv_data.get("applied_phishing_case_id")
+
+                # API 호출 결과를 캐싱하기 위한 함수를 내부에 정의합니다.
+                @st.cache_data(ttl=300)  # 5분 동안 결과 캐시
+                def get_phishing_case_details(id_to_fetch: int):
+                    return api_client.get_phishing_case_by_id(
+                        token=token, case_id=id_to_fetch
+                    )
+
+                if case_id:
+                    with st.spinner(f"피싱 사례(ID: {case_id}) 정보 조회 중..."):
+                        phishing_info = get_phishing_case_details(case_id)
+
+                    if phishing_info:
+                        st.markdown(f"**ID**: `{phishing_info.get('id', 'N/A')}`")
+                        st.markdown(
+                            f"**유형**: `{phishing_info.get('category_code', 'N/A')}`"
+                        )
+                        st.markdown(f"**제목**: `{phishing_info.get('title', 'N/A')}`")
+                        st.text_area(
+                            label="시나리오 내용",
+                            value=phishing_info.get("content", "내용 없음"),
+                            height=150,
+                            disabled=True,
+                            key=f"phishing_content_{selected_conv_id}",
+                        )
+                        with st.popover("전체 데이터 보기"):
+                            st.json(phishing_info)
+                    else:
+                        st.error(
+                            f"피싱 사례(ID: {case_id}) 정보를 불러오는 데 실패했습니다."
+                        )
+                else:
+                    st.info("현재 적용된 피싱 시나리오가 없습니다.")
 
             with st.expander("**AI 응답 테스트하기**", expanded=True):
                 with st.form(key=f"send_message_form_{selected_conv_id}"):

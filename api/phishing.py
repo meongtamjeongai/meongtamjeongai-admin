@@ -64,3 +64,17 @@ class PhishingMixin:
         except requests.exceptions.RequestException as e:
             print(f"피싱 사례 삭제 실패: {e}")
             return False
+
+    def get_phishing_case_by_id(
+        self, token: str, case_id: int
+    ) -> Dict[str, Any] | None:
+        """ID를 사용하여 특정 피싱 사례의 상세 정보를 조회합니다."""
+        headers = {"Authorization": f"Bearer {token}"}
+        url = f"{self.base_url}/phishing/cases/{case_id}"
+        try:
+            response = requests.get(url, headers=headers, timeout=5)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"피싱 사례 상세 조회 실패 (ID: {case_id}): {e}")
+            return None
