@@ -1,6 +1,6 @@
 # views/conversation_view.py
-import time
 import base64
+import time
 
 import pandas as pd
 import streamlit as st
@@ -46,33 +46,61 @@ def render_conversation_test_page(api_client: ApiClient, token: str):
         def get_all_personas_for_selection():
             return api_client.get_personas(token=token)
 
+        @st.cache_data(ttl=300)
+        def get_all_phishing_categories():
+            return api_client.get_phishing_categories()
+
         all_users = get_all_users_for_selection()
         all_personas = get_all_personas_for_selection()
+        all_categories = get_all_phishing_categories()
 
-        if not all_users or not all_personas:
+        if not all_users or not all_personas or not all_categories:
             st.warning(
-                "⚠️ 사용자 또는 페르소나 목록을 불러오는 데 실패했습니다. 잠시 후 새로고침 해주세요."
+                "⚠️ 사용자, 페르소나, 또는 피싱 카테고리 목록을 불러오는 데 실패했습니다. 잠시 후 새로고침 해주세요."
             )
         else:
-            with st.form("create_conversation_form_admin"):
-                st.write(
-                    "관리자 권한으로 특정 사용자와 페르소나 간의 새 대화방을 생성합니다."
-                )
-                col1, col2 = st.columns(2)
+            # ✅ [핵심] 1. 폼(Form) 바깥에서 생성 방식을 먼저 선택받습니다.
+            # 이 라디오 버튼은 클릭 즉시 스크립트를 재실행하여 creation_method 값을 확정합니다.
+            creation_method = st.radio(
+                "시나리오 적용 방식*",
+                options=[
+                    "랜덤 시나리오 적용",
+                    "특정 카테고리 적용 (DB 우선)",
+                    "특정 카테고리 적용 (AI 항상 생성)",
+                ],
+                horizontal=True,
+                help="대화방에 적용될 피싱 시나리오를 어떤 방식으로 선택할지 결정합니다.",
+            )
+            st.divider()
 
+            # ✅ [핵심] 2. 이제 확정된 creation_method 값을 가지고 폼을 그립니다.
+            with st.form("create_conversation_form_admin"):
+                st.write("아래 정보를 입력하고 '생성하기' 버튼을 누르세요.")
+
+                col1, col2 = st.columns(2)
                 with col1:
                     selected_user = st.selectbox(
                         "대상 사용자*",
                         options=all_users,
                         format_func=lambda user: f"{user.get('username', user['email'])} (ID: {user['id']})",
-                        help="대화를 시작할 사용자를 선택하세요.",
                     )
                 with col2:
                     selected_persona = st.selectbox(
                         "대상 페르소나*",
                         options=all_personas,
                         format_func=lambda p: f"{p['name']} (ID: {p['id']})",
-                        help="대화에 사용할 페르소나를 선택하세요.",
+                    )
+
+                # 🔄 [수정] 조건부 UI 로직은 동일하지만, 이제 정확하게 작동합니다.
+                selected_category_code = None
+                if "특정 카테고리" in creation_method:
+                    selected_category = st.selectbox(
+                        "피싱 유형 선택*",
+                        options=all_categories,
+                        format_func=lambda cat: f"{cat['code']} - {cat['description']}",
+                    )
+                    selected_category_code = (
+                        selected_category["code"] if selected_category else None
                     )
 
                 title = st.text_input("대화방 제목 (선택 사항)")
@@ -84,19 +112,52 @@ def render_conversation_test_page(api_client: ApiClient, token: str):
 
                     if not user_id or not persona_id:
                         st.error("사용자와 페르소나를 모두 선택해야 합니다.")
+                    elif (
+                        "특정 카테고리" in creation_method
+                        and not selected_category_code
+                    ):
+                        st.error(
+                            "시나리오 적용 방식으로 '특정 카테고리'를 선택한 경우, 피싱 유형을 반드시 선택해야 합니다."
+                        )
                     else:
                         with st.spinner("대화방 생성 중..."):
-                            result = api_client.create_conversation_admin(
-                                token=token,
-                                user_id=user_id,
-                                persona_id=persona_id,
-                                title=title,
-                            )
+                            result = None
+                            # 🔄 [수정] 옵션 텍스트가 짧아졌으므로 조건문도 맞춰서 수정
+                            if creation_method == "랜덤 시나리오 적용":
+                                result = api_client.create_conversation_admin(
+                                    token=token,
+                                    user_id=user_id,
+                                    persona_id=persona_id,
+                                    title=title,
+                                )
+                            elif creation_method == "특정 카테고리 적용 (DB 우선)":
+                                result = (
+                                    api_client.create_conversation_with_category_admin(
+                                        token=token,
+                                        user_id=user_id,
+                                        persona_id=persona_id,
+                                        category_code=selected_category_code,
+                                        title=title,
+                                    )
+                                )
+                            elif creation_method == "특정 카테고리 적용 (AI 항상 생성)":
+                                result = (
+                                    api_client.create_conversation_with_ai_case_admin(
+                                        token=token,
+                                        user_id=user_id,
+                                        persona_id=persona_id,
+                                        category_code=selected_category_code,
+                                        title=title,
+                                    )
+                                )
+
                         if result and "id" in result:
                             st.success(
                                 f"성공! 새 대화방이 생성되었습니다. (ID: {result['id']})"
                             )
                             st.cache_data.clear()
+                            time.sleep(1)
+                            st.rerun()
                         else:
                             error_detail = (
                                 result.get("detail", "알 수 없는 오류")
@@ -104,6 +165,7 @@ def render_conversation_test_page(api_client: ApiClient, token: str):
                                 else "알 수 없는 오류"
                             )
                             st.error(f"생성 실패: {error_detail}")
+                            # 실패 후에는 다시 그릴 필요 없이 메시지만 보여주면 됩니다.
 
     st.divider()
 
@@ -285,12 +347,12 @@ def render_conversation_test_page(api_client: ApiClient, token: str):
                         if image_key:
                             # Presigned URL은 만료될 수 있으므로 매번 새로 가져오되,
                             # Streamlit의 캐시를 활용하여 동일 키에 대한 중복 호출을 방지합니다.
-                            @st.cache_data(ttl=600) # 10분간 URL 캐시
+                            @st.cache_data(ttl=600)  # 10분간 URL 캐시
                             def get_cached_image_url(key):
                                 return api_client.get_presigned_url_for_download(
                                     token=token, object_key=key
                                 )
-                            
+
                             with st.spinner("이미지 로딩 중..."):
                                 image_url = get_cached_image_url(image_key)
 
@@ -303,7 +365,7 @@ def render_conversation_test_page(api_client: ApiClient, token: str):
                         # 텍스트 내용이 있을 경우에만 표시
                         if msg.get("content"):
                             st.markdown(msg.get("content"))
-                            
+
                         with st.expander("메시지 상세 정보"):
                             # content와 image_key를 제외한 나머지 정보 표시
                             filtered_msg_details = {

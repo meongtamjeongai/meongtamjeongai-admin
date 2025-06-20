@@ -23,4 +23,4 @@ class ApiClient(
     """
 
     def __init__(self):
-        self.base_url = os.getenv("FASTAPI_API_BASE_URL", "http://app:8000/api/v1")
+        self.base_url = os.getenv("FASTAPI_API_BASE_URL", "http://app:80/api/v1")
