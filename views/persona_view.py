@@ -374,7 +374,7 @@ def render_persona_management_page(api_client: ApiClient, token: str):
                     image_key = p.get("profile_image_key")
                     if image_key:
 
-                        @st.cache_data(ttl=3600)
+                        @st.cache_data(ttl=300)
                         def get_cached_download_url(key, auth_token):
                             return api_client.get_presigned_url_for_download(
                                 token=auth_token, object_key=key

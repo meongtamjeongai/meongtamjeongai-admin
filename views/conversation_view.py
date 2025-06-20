@@ -347,7 +347,7 @@ def render_conversation_test_page(api_client: ApiClient, token: str):
                         if image_key:
                             # Presigned URL은 만료될 수 있으므로 매번 새로 가져오되,
                             # Streamlit의 캐시를 활용하여 동일 키에 대한 중복 호출을 방지합니다.
-                            @st.cache_data(ttl=600)  # 10분간 URL 캐시
+                            @st.cache_data(ttl=300)
                             def get_cached_image_url(key):
                                 return api_client.get_presigned_url_for_download(
                                     token=token, object_key=key

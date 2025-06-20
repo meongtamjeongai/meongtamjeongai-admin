@@ -165,18 +165,23 @@ def render_user_management_page(api_client: ApiClient, token: str):
 
             with action_c1:
                 with st.expander("사용자 정보 수정", expanded=True):
-                    # [추가] 이미지 관리 UI
                     img_c1, img_c2 = st.columns(2)
                     with img_c1:
                         st.markdown("**현재 프로필 이미지**")
                         current_image_key = user.get("profile_image_key")
                         if current_image_key:
-                            with st.spinner("이미지 로딩 중..."):
-                                download_url = (
-                                    api_client.get_presigned_url_for_download(
-                                        token=token, object_key=current_image_key
-                                    )
+
+                            @st.cache_data(ttl=300)
+                            def get_cached_user_image_url(key):
+                                return api_client.get_presigned_url_for_download(
+                                    token=token, object_key=key
                                 )
+
+                            with st.spinner("이미지 로딩 중..."):
+                                download_url = get_cached_user_image_url(
+                                    current_image_key
+                                )
+
                             if download_url:
                                 st.image(
                                     download_url,

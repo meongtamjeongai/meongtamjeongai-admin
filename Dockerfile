@@ -1,6 +1,12 @@
 # Dockerfile
 
-FROM python:3.13-slim
+FROM python:3.13-slim-bookworm
+
+# OS 패키지 목록을 업데이트하고, 설치된 패키지를 최신 버전으로 업그레이드하여 보안 취약점을 해결합니다.
+# 'apt-get clean'을 실행하여 불필요한 파일을 정리하고 이미지 용량을 최적화합니다.
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    apt-get clean
 
 # 작업 디렉토리 설정
 WORKDIR /app
